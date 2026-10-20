@@ -1,8 +1,9 @@
 //! HTTP routes, local authorization, and error bodies.
-//! The upstream ChatGPT endpoint is replaced by an in-process mock server;
-//! these tests never contact a live transcription service.
-#![cfg(feature = "server")]
+//! Upstream ChatGPT endpoints are replaced by in-process mock servers; these
+//! tests never contact a live transcription or voice service.
+#![cfg(all(feature = "server", feature = "realtime"))]
 
+use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -12,6 +13,7 @@ use axum::http::{HeaderMap, Request, StatusCode};
 use axum::routing::post;
 use axum::{Json, Router};
 use codex_voice::audio::SilkConfig;
+use codex_voice::realtime::MAX_SDP_BYTES;
 use codex_voice::server::{router, ServerConfig, UpstreamConfig};
 use codex_voice::AuthSource;
 use serde_json::{json, Value};
@@ -19,15 +21,17 @@ use tower::ServiceExt;
 
 const HOST: &str = "127.0.0.1:2600";
 const KEY: &str = "local-key";
+const SDP: &str = "v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\n";
 const WAV: &[u8] = b"RIFF\x24\x00\x00\x00WAVEfmt fixture-audio";
 const BOUNDARY: &str = "codex-voice-test";
 
 #[derive(Clone, Default)]
 struct Upstream {
     uploads: Arc<Mutex<Vec<Value>>>,
+    sessions: Arc<Mutex<Vec<String>>>,
 }
 
-/// Mock of the upstream transcribe endpoint.
+/// Mock of the upstream transcribe and realtime endpoints.
 async fn mock_upstream(transcribe_status: StatusCode) -> (String, Upstream) {
     let upstream = Upstream::default();
     let app =
@@ -60,6 +64,19 @@ async fn mock_upstream(transcribe_status: StatusCode) -> (String, Upstream) {
                     },
                 ),
             )
+            .route(
+                "/realtime/status",
+                post(|| async { Json(json!({"chatreq_token": "status-ticket"})) }),
+            )
+            .route(
+                "/realtime/{mode}",
+                post(
+                    |State(upstream): State<Upstream>, uri: axum::http::Uri| async move {
+                        upstream.sessions.lock().unwrap().push(uri.to_string());
+                        ([("content-type", "application/sdp")], SDP)
+                    },
+                ),
+            )
             .with_state(upstream.clone());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let base = format!("http://{}", listener.local_addr().unwrap());
@@ -76,6 +93,7 @@ fn config(base: &str, api_key: Option<&str>) -> ServerConfig {
         },
         upstream: UpstreamConfig {
             transcribe_endpoint: format!("{base}/backend-api/transcribe"),
+            realtime_base: format!("{base}/"),
             proxy: None,
             request_timeout: Duration::from_secs(5),
             connect_timeout: Duration::from_secs(5),
@@ -91,7 +109,7 @@ fn config(base: &str, api_key: Option<&str>) -> ServerConfig {
 }
 
 fn app(config: ServerConfig) -> Router {
-    router(config)
+    router(config, HOST.parse::<SocketAddr>().unwrap())
 }
 
 fn multipart(parts: &[(&str, Option<&str>, &[u8])]) -> Vec<u8> {
@@ -326,4 +344,88 @@ async fn cross_site_browsers_cannot_use_the_transcription_route() {
         .headers_mut()
         .insert("sec-fetch-site", "same-origin".parse().unwrap());
     assert_eq!(send(&app, same_origin).await.0, StatusCode::OK);
+}
+
+fn realtime_request(host: &str, key: &str, body: impl Into<Body>) -> Request<Body> {
+    Request::post("/v1/realtime/sessions")
+        .header("host", host)
+        .header("origin", format!("http://{host}"))
+        .header("sec-fetch-site", "same-origin")
+        .header("authorization", format!("Bearer {key}"))
+        .header("content-type", "application/json")
+        .body(body.into())
+        .unwrap()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn realtime_session_returns_the_upstream_answer_and_a_correlation_id() {
+    let (base, upstream) = mock_upstream(StatusCode::OK).await;
+    let app = app(config(&base, Some(KEY)));
+    let offer = json!({"sdp": SDP, "mode": "standard", "language": "uk"}).to_string();
+    let (status, _, body) = send(&app, realtime_request(HOST, KEY, offer)).await;
+    assert_eq!(status, StatusCode::OK);
+    let answer: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(answer["sdp"], SDP);
+    assert_eq!(answer["session_id"].as_str().unwrap().len(), 36);
+    assert_eq!(answer.as_object().unwrap().len(), 2);
+    assert_eq!(
+        *upstream.sessions.lock().unwrap(),
+        vec!["/realtime/vps?dcid=0"]
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn realtime_routes_enforce_key_type_and_body_limits_before_upstream() {
+    let (base, upstream) = mock_upstream(StatusCode::OK).await;
+    let app = app(config(&base, Some(KEY)));
+    for (key, body, expected) in [
+        ("wrong", "{}".to_string(), StatusCode::UNAUTHORIZED),
+        (KEY, r#"{"sdp":"invalid"}"#.into(), StatusCode::BAD_REQUEST),
+        (
+            KEY,
+            "x".repeat(MAX_SDP_BYTES * 2 + 4097),
+            StatusCode::PAYLOAD_TOO_LARGE,
+        ),
+        (
+            KEY,
+            json!({"sdp": SDP, "upstream_base": "http://attacker"}).to_string(),
+            StatusCode::BAD_REQUEST,
+        ),
+    ] {
+        let (status, _, _) = send(&app, realtime_request(HOST, key, body)).await;
+        assert_eq!(status, expected);
+    }
+    let mut form = realtime_request(HOST, KEY, json!({"sdp": SDP}).to_string());
+    form.headers_mut()
+        .insert("content-type", "text/plain".parse().unwrap());
+    let (status, _, body) = send(&app, form).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(
+        error_body(&body)["message"],
+        "realtime offer requires application/json"
+    );
+    assert!(upstream.sessions.lock().unwrap().is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn keyless_public_bind_rejects_forged_loopback_hosts_on_realtime() {
+    let (base, _) = mock_upstream(StatusCode::OK).await;
+    for bind in ["0.0.0.0:2600", "[::]:2600", "192.0.2.1:2600"] {
+        let app = router(config(&base, None), bind.parse().unwrap());
+        for host in ["127.0.0.1:2600", "localhost:2600", "[::1]:2600", bind] {
+            for (method, path) in [("POST", "/v1/realtime/sessions")] {
+                let request = Request::builder()
+                    .method(method)
+                    .uri(path)
+                    .header("host", host)
+                    .header("origin", format!("http://{host}"))
+                    .header("sec-fetch-site", "same-origin")
+                    .header("content-type", "application/json")
+                    .body(Body::from("{}"))
+                    .unwrap();
+                let (status, _, _) = send(&app, request).await;
+                assert_eq!(status, StatusCode::FORBIDDEN, "{bind} {host} {path}");
+            }
+        }
+    }
 }

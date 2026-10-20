@@ -1,12 +1,15 @@
-//! Codex Voice: transcription through a Codex login.
+//! Codex Voice: transcription and realtime voice signaling through a Codex login.
 //!
-//! [`audio`] uploads recorded audio for transcription. [`server`] exposes it
-//! over HTTP.
+//! [`audio`] uploads recorded audio for transcription. [`realtime`] negotiates
+//! a WebRTC voice session; the caller owns the media connection. [`server`]
+//! exposes both over HTTP.
 use std::env;
 use std::process::Command;
 
 pub mod audio;
 pub mod auth;
+#[cfg(feature = "realtime")]
+pub mod realtime;
 #[cfg(feature = "server")]
 pub mod server;
 

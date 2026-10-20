@@ -13,7 +13,10 @@ const DEFAULT_CONNECT_TIMEOUT_SECONDS: u64 = 10;
 const DEFAULT_MAX_UPLOAD_MIB: u64 = 10;
 
 #[derive(Debug, Parser)]
-#[command(version, about = "Transcription through a Codex login")]
+#[command(
+    version,
+    about = "Transcription and realtime voice through a Codex login"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Command>,
@@ -266,6 +269,8 @@ fn run_serve(cli: &Cli, args: &ServeArgs) -> Result<(), AnyError> {
         auth,
         upstream: UpstreamConfig {
             transcribe_endpoint: cli.endpoint.clone(),
+            #[cfg(feature = "realtime")]
+            realtime_base: codex_voice::realtime::DEFAULT_UPSTREAM.to_string(),
             proxy: proxy(cli),
             request_timeout: request_timeout(cli)?,
             connect_timeout: connect_timeout(cli)?,
