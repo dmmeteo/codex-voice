@@ -116,9 +116,11 @@ export class RealtimeSession {
       if (apiKey.trim()) headers.Authorization = `Bearer ${apiKey.trim()}`;
       const response = await this.fetch('/v1/realtime/sessions', {method: 'POST', headers, signal, body: JSON.stringify({...options, sdp: peer.localDescription.sdp})});
       if (!current()) return;
-      const result = await response.json().catch(() => { throw new Error('The server returned an unreadable response.'); });
+      const result = await response.json().catch(() => null);
       if (!current()) return;
-      if (!response.ok) throw new Error(result.error?.message || `Realtime request failed (${response.status}).`);
+      if (response.status === 401) throw new Error("Authentication failed (401). Enter this server's API key above, or reload the page to sign in again.");
+      if (!response.ok) throw new Error(result?.error?.message || `Realtime request failed (${response.status}).`);
+      if (!result) throw new Error('The server returned an unreadable response.');
       if (typeof result.sdp !== 'string' || result.sdp.length > 128 * 1024 || typeof result.session_id !== 'string') throw new Error('The server returned an invalid voice answer.');
       this.sessionId = result.session_id;
       await peer.setRemoteDescription({type: 'answer', sdp: result.sdp});
@@ -363,8 +365,13 @@ export function mountRealtime(document, {apiKey, Session = RealtimeSession, now 
     return session.phase === 'idle' && ($('mode').value === 'standard' || $('save-conversation').checked);
   }
 
+  const READY = 'Ready. Start to allow microphone access.';
+  const historyRequired = () => `${$('mode').value[0].toUpperCase()}${$('mode').value.slice(1)} voice requires Save conversation. Turn it on, or choose Standard.`;
+
   function renderStart() {
     $('start').disabled = !canStart();
+    if (session.phase === 'idle' && !canStart()) $('status').textContent = historyRequired();
+    else if (session.phase === 'idle' && $('status').textContent.endsWith('requires Save conversation. Turn it on, or choose Standard.')) $('status').textContent = READY;
     $('save-help').textContent = $('save-conversation').checked
       ? 'This conversation will be saved to ChatGPT history.'
       : $('mode').value === 'standard'
@@ -415,6 +422,6 @@ export function mountRealtime(document, {apiKey, Session = RealtimeSession, now 
   $('clear').addEventListener('click', () => $('events').replaceChildren());
 
   renderModel();
-  session.setState('idle', 'Ready. Start to allow microphone access.');
+  session.setState('idle', READY);
   return session;
 }

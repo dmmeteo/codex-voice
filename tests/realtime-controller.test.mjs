@@ -100,3 +100,15 @@ test('Data channel events fill the Transcript and Events panes; Clear empties on
   assert.equal(f.get('events').children.length, 0);
   assert.equal(f.get('transcripts').children.length, 2);
 });
+
+test('A disabled Start states the history requirement in the status line', () => {
+  const f = fixture();
+  assert.equal(f.get('status').textContent, 'Ready. Start to allow microphone access.');
+  f.get('mode').value = 'advanced';
+  f.get('mode').listeners.change();
+  assert.equal(f.get('start').disabled, true);
+  assert.equal(f.get('status').textContent, 'Advanced voice requires Save conversation. Turn it on, or choose Standard.');
+  f.get('save-conversation').checked = true;
+  f.get('save-conversation').listeners.change();
+  assert.equal(f.get('status').textContent, 'Ready. Start to allow microphone access.');
+});

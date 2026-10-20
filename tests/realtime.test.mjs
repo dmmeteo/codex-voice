@@ -387,3 +387,22 @@ test('A failed signaling response surfaces the server error and releases media',
   assert.equal(f.track.stopped, true);
   assert.equal(Peer.instances.at(-1).closed, true);
 });
+
+test('A 401 with a non-JSON body gives actionable sign-in guidance and releases media', async () => {
+  const f = fixture();
+  microphone(async () => f.stream);
+  globalThis.fetch = async () => ({ok: false, status: 401, json: async () => { throw new SyntaxError('Unexpected token <'); }});
+  await f.session.start({mode: 'standard'});
+  assert.equal(f.session.phase, 'idle');
+  assert.match(f.states.at(-1).detail, /^Authentication failed \(401\)\. .*API key.*sign in/);
+  assert.equal(f.track.stopped, true);
+  assert.equal(Peer.instances.at(-1).closed, true);
+});
+
+test('A 401 JSON error from the local key check gets the same guidance', async () => {
+  const f = fixture();
+  microphone(async () => f.stream);
+  globalThis.fetch = async () => ({ok: false, status: 401, json: async () => ({error: {message: 'missing or invalid bearer token', type: 'authentication_error'}})});
+  await f.session.start({mode: 'standard'});
+  assert.match(f.states.at(-1).detail, /^Authentication failed \(401\)\./);
+});
