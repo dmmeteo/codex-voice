@@ -1,163 +1,139 @@
-# Codex Voice clients and integration boundaries
+# Voice client guide
 
-Codex Voice negotiates private ChatGPT voice sessions and uploads files for
-transcription. The Rust server does not relay ongoing WebRTC audio or implement
-native Hermes GPT-Live delegation. The repository README contains the supported
-HTTP routes, auth, configuration, and request schemas. This guide may also be
-copied into a local package as VOICE.md; an adjacent package README is its launcher
-quickstart, not the repository's full API reference.
+Codex Voice uploads audio files for transcription and negotiates private ChatGPT
+voice sessions. The Rust server handles signaling. WebRTC carries ongoing audio
+and events directly between the client and the upstream service.
 
-## Use the static demo
+This guide also ships as `VOICE.md` in the macOS package. The package README
+explains the launcher. The repository's `docs/api.md` and
+`docs/configuration.md` contain the complete HTTP and configuration references.
 
-1. Start the server using the repository README or an existing local package's
-   launcher instructions. Source defaults are loopback port 2600.
-2. Open `http://127.0.0.1:2600/`. Enter the local server key when configured.
-   Remote browser microphone use needs trusted HTTPS and an exact keyed
-   `--allowed-host` authority, as described in the repository README.
-3. In **Transcriptions**, choose a file and click **Transcribe file**, or click
-   **Record** and allow microphone access. **Stop and transcribe** ends recording
-   and uploads the file. During a pending request, **Stop** cancels it. The result
-   appears on the right.
-4. In **Realtime**, choose a mode and voice. Standard and `cove` are defaults.
-   Leave **Save conversation** off for temporary history. The current UI requires
-   that explicit checkbox for Advanced and Wingman. **Transcripts** requests text
-   independently of saving.
-5. Click **Start**, allow microphone access, and wait for **Active**. View the
-   **Transcript** or **Events** output on the right. HTTP success alone does not
-   establish readiness.
-6. Click **Pause** to mute the microphone and local playback. **Resume** restores
-   them. The remote service may still process audio and send events while paused.
-7. Click **Stop** to close the peer, data channel, and microphone tracks. Leaving
-   the page also cleans up recording and realtime media.
+## Use the demo
 
-Realtime settings apply on the next Start and stay locked during the session.
+1. Start the server and open `http://127.0.0.1:2600/`. Enter the local server key
+   when configured. Remote microphone access requires trusted HTTPS.
+2. In **Transcriptions**, choose **Upload file** or **Microphone**. For a recording,
+   click **Record**, allow microphone access, then click **Stop**. Preview the
+   resulting clip and click **Transcribe**. During upload, **Cancel** aborts the
+   request. The transcript appears on the right.
+3. In **Realtime**, choose a mode and voice. Wingman and Cove are the defaults.
+   **Save conversation** starts off. Wingman and Advanced require you to enable
+   saving explicitly. To keep saving off, choose Standard. **Transcripts** starts
+   on and requests text independently of saving.
+4. Click **Start**, allow microphone access, and wait for **Active**. A successful
+   HTTP response alone does not establish readiness. Settings stay locked until
+   the session ends.
+5. Read **Transcript** for newest-first speaker bubbles. **Events** shows
+   timestamped connection and service events, with formatted JSON details.
+   **Clear** clears the event list without clearing the transcript.
+6. Click **Pause** to mute microphone input and local playback. **Resume** restores
+   both. The upstream service may still process audio and send events while paused.
+7. Click **Stop** to close the peer, data channel, and microphone tracks.
+   Leaving the page also cleans up transcription and realtime media.
+
 Each Start creates a new peer and clears the displayed transcript. Saving to
 ChatGPT history does not make a conversation resumable through this client.
-The local key stays in the page input. No upstream token is sent to the browser.
+The local key stays in the page input. No upstream credential goes to the browser.
 
-## Signaling and media lifecycle
-
-A non-demo client performs the following sequence:
+## Connect another WebRTC client
 
 1. Request an audio stream and create an `RTCPeerConnection`.
 2. Add the microphone track with an audio `sendrecv` transceiver.
 3. Create a negotiated data channel with an empty label and ID `0`.
 4. Create an offer, set its local description, and gather ICE candidates.
-5. POST `application/json` containing the real local `sdp` and options to
-   `/v1/realtime/sessions`. Send the local bearer key when configured.
-6. Apply the returned `sdp` as the remote answer. Retain `session_id` for
+5. POST `application/json` with the complete local `sdp` and options to
+   `/v1/realtime/sessions`. Include the local bearer key when configured.
+6. Apply the returned `sdp` as the remote answer. Keep `session_id` for
    correlation only.
-7. Receive audio through the peer's track event and text/events on the data
-   channel. Close the peer and tracks on completion, cancellation, or failure.
+7. Receive audio through the peer's track event and events on the data channel.
+   Close the peer and tracks on completion, cancellation, or failure.
 
 There are no HTTP pause, resume, stop, delete, conversation-continuation, or event
-polling resources. A signaling response does not carry a conversation by itself.
-The controller waits for connected transport and an open data channel. Advanced
-and Wingman also require successful `startup_telemetry`; Standard does not.
+polling resources. The client owns media and cleanup.
+
+The demo waits for connected transport and an open data channel. Advanced and
+Wingman also require successful `startup_telemetry`. Standard does not.
 The client startup limit is 90 seconds, separate from upstream HTTP timeouts.
-Microphone state is sent when the channel opens and on Pause/Resume.
+The client sends microphone state when the channel opens and on Pause or Resume.
 
-The JSON API defaults to Advanced, unlike the demo's Standard default. Both
-JSON and the library default `history_and_training_disabled` to `true`. The UI
-sends the inverse of **Save conversation**. The JSON handler forwards either
-history value for all modes, without enforcing the UI's saving restriction.
-Availability and live startup behavior require verification for the actual account.
+The JSON API defaults to Advanced, while the demo defaults to Wingman.
+Both JSON and the Rust library default `history_and_training_disabled` to `true`.
+The demo sends the inverse of **Save conversation**. The JSON handler forwards
+either history value for every mode without enforcing the demo's saving restriction.
+Mode availability and startup behavior depend on the account and upstream service.
 
-Offers must start with `v=0`, contain audio media, and contain no NUL bytes.
-SDP and upstream response bodies are limited to 128 KiB. The JSON body has a
-separate limit of `2 * 128 KiB + 4096` bytes. Language tags contain at most 35
-ASCII letters, digits, or hyphens. Timezone names contain 1 to 64 ASCII letters,
-digits, or `/`, `_`, `+`, `-`. UTC offsets are integer minutes west of UTC,
-between -840 and 840.
-
-File transcription and negotiation share the server's concurrency limiter.
-Transcription waits for a permit; negotiation returns 429 if none is available.
-A negotiation permit covers signaling, not the WebRTC session's lifetime.
-Host/Origin checks protect HTML, static assets, and signaling. Transcription
-rejects cross-site browser requests but has no exact Host allowlist. Static
-assets and health do not require a local key; both POST handlers check the key.
-Without a key, non-loopback binds disable browser routes and realtime signaling.
-This does not make a keyless non-loopback transcription server safe to expose.
-
-## Events and model identity
+## Read events and model metadata
 
 The browser accepts `data_message` envelopes with object or JSON-string `data`,
 transcript snapshots, compact deltas, and Standard-mode
-`streaming_message_update`. It displays visible user/assistant text with no
+`streaming_message_update`. It displays visible user and assistant text with no
 channel or the `final` channel. Unknown event types stay in the event log.
-Parser support is not proof that the live service emits every supported shape.
+Parser support does not prove that the live service emits every supported shape.
+Upstream markup, including Entity tags, is rendered as text.
 
-Modes select private service behavior, not a verified voice model. Standard and
-Advanced requests contain legacy `gpt-4o` fields. Wingman reads the account's
-current default model and sends it as `backend_model`. Neither request establishes
-the served model. The UI displays a bounded `resolved_model_slug` from visible
+Modes select private service behavior. Standard and Advanced send legacy
+`gpt-4o` request fields. Wingman reads the account's current default model and
+sends it as `backend_model`. These request fields do not establish the served
+model. **Reported model** displays a bounded `resolved_model_slug` from visible
 assistant messages. A reported `gpt-6` does not distinguish Sol from Astra.
 There is no verified `gptlive-1.1` selector or established voice price here.
 
-## Hermes file STT and native GPT-Live
+## Understand upstream usage limits
 
-File STT compatibility is the narrow multipart seam. An adapter posts audio to
-`/v1/audio/transcriptions` and reads `{text}`. A sent `model` value is ignored.
-The repository's Python/Node SDK examples demonstrate that request shape, not
-completed Hermes or Discord transport integration.
+Codex Voice does not bypass upstream account limits. Voice availability depends
+on your account plan, the feature and mode in use, and upstream policy.
 
-To validate an installed Hermes STT adapter against a candidate revision:
+As of October 20, 2026, the official
+[ChatGPT Voice documentation](https://help.openai.com/en/articles/20001274-chatgpt-voice)
+measures Live usage in Chat mode over a rolling 24-hour period. Its Voice in Chat
+table lists 15 hours with GPT-Live-1 for the $100/month Pro plan. This is an
+allowance over the preceding 24 hours, not a reset at midnight. The article
+also distinguishes desktop voice pricing and limits.
 
-1. Use the same public speech sample bytes for both the old and new servers.
-   Record the sample's digest and the candidate source revision.
-2. Invoke the actual installed adapter with its existing local authentication
-   supplied externally. Record the destination route, multipart fields, response
-   status, and transcript without saving keys or auth files.
-3. Compare the transcripts and errors. If recording elapsed times, use the same
-   method for both calls and distinguish network/upload time from transcription.
-4. Keep deployment-specific final checks separate from this adapter comparison.
-   Repeat relevant checks if the binary or configuration changes. Keep operational
-   addresses and raw evidence outside public docs. A mock or a curl-only probe is
-   not this adapter test.
+That Chat mode table does not establish which quota applies to Codex Voice's
+private Standard, Advanced, or Wingman transport. The 15-hour example is not a
+measured Codex Voice allowance. A model's conversational answer cannot establish
+remaining quota, fallback behavior, or the identity of the served model.
 
-The default-feature release build at source checkpoint `42d19a6` was verified
-through the installed, unmodified Hermes STT adapter using identical public JFK
-FLAC bytes against the old and new servers. Both returned HTTP 200 with string
-transcripts differing only in punctuation. Fourteen local HTTP, security, and
-body-limit checks also passed. The legacy service stayed unchanged; the candidate
-was stopped cleanly after verification.
+File transcription and realtime voice use different requests. Voice allowances
+do not establish transcription allowances, and successful transcription does
+not prove that realtime quota remains. This project reports no remaining quota
+and makes no unrestricted or unlimited transcription claim.
 
-This is a file-STT compatibility observation for that binary and fixture. It is
-not a performance benchmark, production switch, or proof of native GPT-Live or
-Discord integration. Deployment-specific final checks and Dima's manual UAT
-remain separate. Browser or agent smoke checks do not replace that manual UAT.
+## Integrate file transcription
 
-Native Hermes GPT-Live uses an OpenAI project key and a different upstream
-contract. Its session request to `POST /v1/live/sessions` nests
-`session.delegation.type = "client"` and `transport.type = "webrtc"` with
-`transport.sdp`. Delegation uses `session.delegation.created` and
-`session.commentary.append`. These are external GPT-Live protocol names, not
-Codex Voice routes or events. Codex Voice instead accepts the flat private
-`{sdp,mode,voice,...}` offer and returns `{sdp,session_id}`. Changing a base URL
-or model name does not translate those protocols. A real bridge would need media
-handling, event translation, delegation, and live acceptance.
+An STT adapter can post multipart audio to `/v1/audio/transcriptions` and read
+`{"text":"..."}`. A sent `model` value is ignored. The repository's Python and
+Node SDK examples demonstrate this request format.
 
-See the official [Hermes voice documentation](https://hermes-agent.nousresearch.com/docs/user-guide/features/voice-mode)
-and [GPT-Live guide](https://developers.openai.com/api/docs/guides/live) for those
-separate systems. Neither implies that this server implements them. Discord
-voice-channel audio additionally needs its own transport integration.
+Native Hermes GPT-Live uses a different signaling and delegation contract.
+Changing a base URL or model name does not translate that protocol. A bridge
+needs media handling, event translation, delegation, and live acceptance.
+Discord voice channels also need their own audio transport integration.
+Neither integration is implemented by file STT compatibility or JSON SDP signaling.
 
-## Rust API and verification
+To verify an installed STT adapter, compare the same public audio bytes against
+the existing and candidate servers through the actual adapter. Record fixture
+digests, revisions, statuses, and transcripts outside the repository. Keep keys
+and auth contents out of the evidence. Mock or curl-only checks do not establish
+installed-adapter compatibility.
+
+## Use the Rust library
 
 `codex_voice::audio::TranscriptionClient` uploads files.
 `codex_voice::realtime::RealtimeClient::new(CodexAuth, RealtimeClientConfig)`
 creates the asynchronous signaling client. `create_session(RealtimeOffer).await`
-returns `RealtimeAnswer` with `sdp` and `session_id`. The caller supplies a runtime
-and owns WebRTC media. `RealtimeClientConfig::default()` uses 60/15-second
-request/connect timeouts, unlike the CLI server's 120/10-second defaults.
+returns `RealtimeAnswer` with `sdp` and `session_id`. The caller supplies an async
+runtime and owns WebRTC media. `RealtimeClientConfig::default()` uses request and
+connect timeouts of 60 and 15 seconds, unlike the CLI server's 120 and 10 seconds.
 
 Default features enable `server` and `realtime`. Disable both for an audio-only
-library. Enable only `server` for an ASR-only HTTP server or only `realtime` for
-signaling without Axum. The optional demo needs no JavaScript framework or build.
-A default source build uses the pinned Rust 1.98.0 toolchain, CMake,
-Clang/libclang, and pkg-config.
+library. Enable only `server` for a transcription HTTP server or only `realtime`
+for signaling without Axum. The static demo needs no JavaScript build step.
 
-The repository verification commands include:
+## Verify a change
+
+Run the affected checks in an environment with the required toolchain:
 
 ```sh
 cargo fmt --check
@@ -167,10 +143,12 @@ cargo check --locked --no-default-features --features server --all-targets
 cargo check --locked --no-default-features --features realtime --all-targets
 cargo clippy --locked --all-targets --all-features -- -D warnings
 cargo clippy --locked --all-targets --no-default-features -- -D warnings
-node --test tests/*.test.mjs
+node --test --test-concurrency=1 tests/*.test.mjs
 ```
 
-These are instructions, not a claim that this documentation lane ran Rust builds.
-Rust tests use local mock upstreams; Node tests simulate browser media. They do
-not prove live account access, browser microphone permission, remote audio,
-transcript delivery, served model identity, pricing, deployment, or manual UAT.
+Rust mock upstreams and Node browser fixtures provide offline verification.
+They do not prove live microphone permission, audio playback, transcript delivery,
+model identity, pricing, deployment, or completed manual acceptance.
+The README screenshots record real file transcription and a Standard WebRTC
+session using public sample audio with saving off. Those captures establish only
+those observations, not a full acceptance run for every mode or browser.

@@ -1,7 +1,7 @@
 # Working on Codex Voice
 
-Read this file at entry and after context loss. Read README.md for current usage,
-configuration, and HTTP schemas. Read docs/voice.md for media lifecycle and
+Read this file at entry and after context loss. Read README.md for current usage.
+Read docs/api.md and docs/configuration.md for HTTP schemas and configuration. Read docs/voice.md for media lifecycle and
 integration boundaries. Read ROADMAP.md when changing unfinished accepted work.
 
 ## Accepted rules
@@ -21,6 +21,9 @@ integration boundaries. Read ROADMAP.md when changing unfinished accepted work.
 - Require a local key unless the operator explicitly chooses trusted-loopback
   `--no-api-key`. Additional exact `--allowed-host` authorities require a key.
   Preserve Host/Origin checks and do not trust forwarded headers as authorization.
+- The demo defaults to Wingman with Save conversation off. Wingman and Advanced
+  require explicit saving in the UI. Standard can run without it. The JSON API
+  defaults to Advanced and does not enforce the UI saving requirement.
 - Keep saving to ChatGPT history an explicit user choice. Keep upstream tokens,
   private tickets, account identifiers, and auth contents out of browser data,
   public docs, examples, and reports.
@@ -28,7 +31,7 @@ integration boundaries. Read ROADMAP.md when changing unfinished accepted work.
   Model names and request fields do not establish the served backend. Do not
   claim a `gptlive-1.1` selector, voice price, or completed Hermes/Discord voice
   bridge without actual evidence.
-- Preserve LICENSE-MIT exactly, including the inherited codex-asr contributors
+- Preserve LICENSE-MIT exactly, including the inherited contributors
   copyright and permission notice. Upstream artifacts are not this project's
   distribution. Published metadata does not prove a release passed manual UAT.
 

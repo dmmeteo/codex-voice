@@ -1,35 +1,34 @@
 # Codex Voice roadmap
 
-Checked items describe implemented source structure and client behavior, not a
-released or deployed service. Live acceptance remains separate.
+Checked items describe implemented behavior or the specific recorded observation.
+Release acceptance and deployment remain separate.
 
-- [x] Reorganize the Rust API, shared auth/server, and audio/realtime domains with
-  CLI/start in main.rs and public API in lib.rs.
-- [x] Use Codex Voice package, binary, crate, and environment names with default
-  loopback port 2600, concurrency 1, 10 MiB multipart body limit, and 120/10-second
-  upstream request/connect timeouts.
-- [x] Expose canonical transcription and private JSON realtime session routes.
-  Remove the verified obsolete alias and old voice/config routes. Add exact
-  keyed private proxy Host authorities with `--allowed-host`.
-- [x] Provide a minimal white static demo with Transcriptions and Realtime views.
-  Keep options left, transcript right, and Transcript/Events output for Realtime.
-  Use only the ordinary public API and static assets.
-- [ ] Complete manual UAT on the integrated revision, including file/microphone
-  transcription, keyed proxy and secure origin, explicit history saving, real
-  WebRTC audio/events, failed startup, Pause/Resume, and Stop cleanup.
-- [x] Verify the default-feature release build at source checkpoint `42d19a6`
-  through the installed, unmodified Hermes STT adapter with the same public JFK
-  FLAC fixture as the old server. Both returned HTTP 200 with string transcripts
-  differing only in punctuation. This establishes file-STT compatibility only.
-- [ ] Gate stable images, tags, and releases on Dima's manual UAT. Allow
-  publication of cleaned main history only after verified backup and
-  publication-gate repair under its separate authorization. Browser or agent
-  smoke checks do not replace manual UAT.
-- [ ] Run deployment-specific final checks and accept service replacement under
-  separate deployment authority. Preserve the existing live service until the
-  authorized migration.
-- [ ] Define and verify a real Hermes/Discord voice media integration. File STT
-  compatibility and private ChatGPT SDP signaling do not implement native
-  GPT-Live delegation or Discord audio transport.
-- [ ] Record the Screenshot Studio GIF after integrated manual UAT. Link only a
-  real authorized artifact.
+- [x] Provide a Rust library, CLI, and HTTP server with shared authentication and
+  separate transcription and realtime modules.
+- [x] Use loopback port 2600, concurrency 1, a 10 MiB multipart body limit, and
+  upstream request and connect timeouts of 120 and 10 seconds by default.
+- [x] Expose canonical transcription and private JSON SDP signaling routes with
+  local key protection and exact keyed proxy Host authorities.
+- [x] Provide a minimal white demo with Transcriptions and Realtime tabs, audio
+  preview, newest-first speaker bubbles, and readable Events output.
+- [x] Default the demo to Wingman while leaving Save conversation off. Require
+  explicit saving for Wingman and Advanced. Allow Standard without saving.
+- [x] Verify installed Hermes file-STT compatibility using the same public speech
+  fixture against the existing and candidate servers. This observation covers
+  transcription only, not native GPT-Live or Discord voice.
+- [x] Record the owner's working-demo acceptance and two real upstream captures
+  using public sample audio. The realtime capture uses Standard with saving off.
+- [ ] Complete and record the release acceptance checklist on the revision to be
+  published. Cover file and microphone transcription, keyed proxy and secure
+  origin, explicit saving, real WebRTC audio and events, failed startup,
+  Pause/Resume, and Stop cleanup. The owner's working-demo acceptance and the
+  two captures do not by themselves record every check in this list.
+- [ ] Confirm manual acceptance before tags, releases, or image publication.
+  Docker CI builds on pull requests and main pushes without publishing. Version
+  tags and manual Docker workflow runs can publish images. Release CI publishes
+  on matching version tags. These triggers do not enforce manual UAT, so the
+  release owner must verify the gate before invoking them.
+- [ ] Run deployment-specific final checks and authorize service replacement
+  separately from source publication.
+- [ ] Implement and live-test a Hermes GPT-Live or Discord voice bridge if needed.
+  File transcription compatibility does not provide those media transports.

@@ -17,6 +17,11 @@ The server reads Codex authentication from `$CODEX_HOME/auth.json` or
 `~/.codex/auth.json` when you start a session. Do not place an auth file in this
 folder. The browser needs network access to ChatGPT for voice sessions.
 
-Read `VOICE.md` for mode settings, session behavior, API fields, and limits.
-Codex Voice is based on https://github.com/Wangnov/codex-asr. `LICENSE-MIT`
-contains the upstream license and attribution.
+Read `VOICE.md` for mode settings, media lifecycle, and usage limits.
+`LICENSE-MIT` contains the inherited copyright and full permission notice.
+
+Realtime defaults to Wingman with **Save conversation** off. Enable saving
+explicitly to start Wingman or Advanced, or choose Standard to keep saving off.
+For file transcription, preview the upload or recording, then click **Transcribe**.
+The package is a local source build, not evidence of a published or UAT-approved
+release.
