@@ -98,11 +98,11 @@ show the newest messages first. **Events** shows timestamped connection and
 service events with formatted JSON details. **Pause** mutes the microphone and
 playback locally. **Stop** closes the connection and releases the microphone.
 
-![Realtime Standard session with saving off](docs/screenshots/realtime.png)
+![Wingman UI showing an illustrative English example conversation](docs/screenshots/realtime.png)
 
-Real WebRTC session using the same public sample audio in Standard mode, with
-saving off. The reported model label is upstream metadata, not a guarantee of
-the served backend. Literal upstream Entity markup is displayed as text.
+**Example conversation.** Illustrative English dialogue rendered offline in the
+actual Wingman UI with newest-first bubbles. No upstream calls were made and no
+conversation was saved. This image does not verify API behavior.
 
 The server's `POST /v1/realtime/sessions` accepts a JSON SDP offer and returns an
 answer. WebRTC carries audio and events after negotiation. A curl request alone

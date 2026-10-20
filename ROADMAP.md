@@ -17,12 +17,14 @@ Release acceptance and deployment remain separate.
   fixture against the existing and candidate servers. This observation covers
   transcription only, not native GPT-Live or Discord voice.
 - [x] Record the owner's working-demo acceptance and two real upstream captures
-  using public sample audio. The realtime capture uses Standard with saving off.
+  using public sample audio. The historical realtime capture uses Standard with
+  saving off. The README now pairs the real transcription with an illustrative
+  English Wingman conversation rendered offline.
 - [ ] Complete and record the release acceptance checklist on the revision to be
   published. Cover file and microphone transcription, keyed proxy and secure
   origin, explicit saving, real WebRTC audio and events, failed startup,
   Pause/Resume, and Stop cleanup. The owner's working-demo acceptance and the
-  two captures do not by themselves record every check in this list.
+  historical captures do not by themselves record every check in this list.
 - [ ] Confirm manual acceptance before tags, releases, or image publication.
   Docker CI builds on pull requests and main pushes without publishing. Version
   tags and manual Docker workflow runs can publish images. Release CI publishes

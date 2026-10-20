@@ -149,6 +149,8 @@ node --test --test-concurrency=1 tests/*.test.mjs
 Rust mock upstreams and Node browser fixtures provide offline verification.
 They do not prove live microphone permission, audio playback, transcript delivery,
 model identity, pricing, deployment, or completed manual acceptance.
-The README screenshots record real file transcription and a Standard WebRTC
-session using public sample audio with saving off. Those captures establish only
-those observations, not a full acceptance run for every mode or browser.
+The README shows a real file transcription and an illustrative English Wingman
+conversation rendered offline in the actual UI. The illustration made no
+upstream calls and does not verify API behavior. A prior Standard WebRTC capture
+used public sample audio with saving off. That observation does not establish
+full acceptance for every mode or browser.
