@@ -2,12 +2,14 @@ const UNSUPPORTED = 'Recording needs a browser with microphone access on localho
 const EXTENSIONS = {'audio/webm': 'webm', 'audio/ogg': 'ogg', 'audio/mp4': 'm4a', 'audio/wav': 'wav', 'audio/mpeg': 'mp3'};
 
 /**
- * One transcription at a time, from a file or a microphone recording.
- * Phases: idle → requesting → recording → uploading → idle. Every exit
- * releases the microphone; results from a cancelled generation are dropped.
+ * One transcription at a time. A file or a finished microphone recording
+ * becomes the current clip; only an explicit transcribe uploads it.
+ * Phases: idle → requesting → recording → stopping → idle, and
+ * idle → uploading → idle. Every exit releases the microphone; results from
+ * a cancelled generation are dropped.
  */
 export class TranscriptionSession {
-  constructor({onState, onText, fetch = (...args) => globalThis.fetch(...args),
+  constructor({onState, onText, onClip = () => {}, fetch = (...args) => globalThis.fetch(...args),
     getUserMedia = async constraints => {
       if (!globalThis.navigator?.mediaDevices?.getUserMedia) throw new Error(UNSUPPORTED);
       return globalThis.navigator.mediaDevices.getUserMedia(constraints);
@@ -15,6 +17,7 @@ export class TranscriptionSession {
     Recorder = globalThis.MediaRecorder}) {
     this.onState = onState;
     this.onText = onText;
+    this.onClip = onClip;
     this.fetch = fetch;
     this.getUserMedia = getUserMedia;
     this.Recorder = Recorder;
@@ -33,14 +36,14 @@ export class TranscriptionSession {
   transcribeFile(file, options) {
     if (this.phase !== 'idle') return Promise.resolve();
     if (!file) {
-      this.setState('idle', 'Choose an audio file first.');
+      this.setState('idle', 'Choose a file or record audio first.');
       return Promise.resolve();
     }
     this.cleanup();
     return this.#upload(file, file.name || 'audio', options);
   }
 
-  async startRecording(options) {
+  async startRecording() {
     if (this.phase !== 'idle') return;
     this.cleanup();
     const generation = this.generation;
@@ -60,12 +63,13 @@ export class TranscriptionSession {
         this.recorder = null;
         this.#releaseMicrophone();
         const type = (recorder.mimeType || chunks[0]?.type || 'audio/webm').split(';')[0].trim();
-        const blob = new Blob(chunks, {type});
-        if (!blob.size) { this.setState('idle', 'Nothing was recorded.'); return; }
-        this.#upload(blob, `recording.${EXTENSIONS[type] || 'webm'}`, options);
+        const clip = new File(chunks, `recording.${EXTENSIONS[type] || 'webm'}`, {type});
+        if (!clip.size) { this.setState('idle', 'Nothing was recorded.'); return; }
+        this.onClip(clip);
+        this.setState('idle', 'Recording ready. Play it back, then Transcribe.');
       };
       recorder.start();
-      this.setState('recording', 'Recording. Stop to transcribe.');
+      this.setState('recording', 'Recording. Stop when you are done.');
     } catch (error) {
       if (generation === this.generation) {
         this.fail(error?.name === 'NotAllowedError'
@@ -75,10 +79,10 @@ export class TranscriptionSession {
     }
   }
 
-  /** Ends a recording and uploads it; in any other phase it cancels. */
+  /** Ends a recording and keeps it as the clip; in any other phase it cancels. */
   stop() {
     if (this.phase !== 'recording') { this.cancel(); return; }
-    this.setState('uploading', 'Transcribing…');
+    this.setState('stopping', 'Preparing the recording…');
     this.recorder.stop();
   }
 
@@ -140,14 +144,29 @@ export class TranscriptionSession {
 export function mountTranscriptions(document, {apiKey, Session = TranscriptionSession} = {}) {
   const $ = id => document.getElementById(id);
   const options = () => ({language: $('transcription-language').value, apiKey: apiKey()});
+  let clip = null, previewUrl = '';
   const render = phase => {
     const idle = phase === 'idle';
-    $('transcribe-file').disabled = !idle || !$('transcription-file').files?.length;
+    const upload = $('source-upload').checked;
+    $('upload-pane').hidden = !upload;
+    $('microphone-pane').hidden = upload;
+    $('transcribe').disabled = phase !== 'uploading' && !(idle && clip);
+    $('transcribe').textContent = phase === 'uploading' ? 'Cancel' : 'Transcribe';
     $('record').disabled = !idle;
-    $('record-stop').disabled = idle;
-    $('record-stop').textContent = phase === 'recording' ? 'Stop and transcribe' : 'Stop';
-    $('transcription-file').disabled = !idle;
-    $('transcription-language').disabled = !idle;
+    $('record-stop').disabled = !['requesting', 'recording'].includes(phase);
+    for (const id of ['transcription-file', 'source-upload', 'source-microphone', 'transcription-language', 'clip-clear']) $(id).disabled = !idle;
+    $('clip-clear').hidden = !clip;
+  };
+  const setClip = file => {
+    if (previewUrl) globalThis.URL?.revokeObjectURL?.(previewUrl);
+    clip = file || null;
+    previewUrl = clip instanceof Blob && globalThis.URL?.createObjectURL ? URL.createObjectURL(clip) : '';
+    const preview = $('clip-preview');
+    if (previewUrl) preview.src = previewUrl; else preview.removeAttribute?.('src');
+    preview.load?.();
+    preview.hidden = !previewUrl;
+    $('clip-name').textContent = clip ? `${clip.name || 'audio'} · ${clip.type || 'unknown type'}` : 'No audio yet.';
+    render(session.phase);
   };
   const session = new Session({
     onState: ({phase, detail}) => {
@@ -155,11 +174,21 @@ export function mountTranscriptions(document, {apiKey, Session = TranscriptionSe
       render(phase);
     },
     onText: text => { $('transcription-text').textContent = text; },
+    onClip: setClip,
   });
-  $('transcription-file').addEventListener('change', () => render(session.phase));
-  $('transcribe-file').addEventListener('click', () => session.transcribeFile($('transcription-file').files?.[0], options()));
-  $('record').addEventListener('click', () => session.startRecording(options()));
+  for (const id of ['source-upload', 'source-microphone']) $(id).addEventListener('change', () => render(session.phase));
+  $('transcription-file').addEventListener('change', () => {
+    setClip($('transcription-file').files?.[0]);
+    $('transcription-status').textContent = clip ? 'File ready. Play it back, then Transcribe.' : 'Choose a file or record from the microphone.';
+  });
+  $('transcribe').addEventListener('click', () => session.phase === 'uploading' ? session.cancel() : session.transcribeFile(clip, options()));
+  $('record').addEventListener('click', () => { setClip(null); session.startRecording(); });
   $('record-stop').addEventListener('click', () => session.stop());
+  $('clip-clear').addEventListener('click', () => {
+    setClip(null);
+    if ($('transcription-file').value !== undefined) $('transcription-file').value = '';
+    $('transcription-status').textContent = 'Choose a file or record from the microphone.';
+  });
   render(session.phase);
   return session;
 }

@@ -20,12 +20,23 @@
 <main>
   <section id="transcriptions" role="tabpanel" aria-labelledby="tab-transcriptions" class="split">
     <div class="options">
-      <label>Audio file<input id="transcription-file" type="file" accept="audio/*,.silk,.slk"></label>
+      <fieldset class="audio-field">
+        <legend>Audio</legend>
+        <div class="source" role="radiogroup" aria-label="Audio source">
+          <label class="check"><input id="source-upload" type="radio" name="audio-source" value="upload" checked> Upload file</label>
+          <label class="check"><input id="source-microphone" type="radio" name="audio-source" value="microphone"> Microphone</label>
+        </div>
+        <div id="upload-pane"><input id="transcription-file" type="file" accept="audio/*,.silk,.slk" aria-label="Audio file"></div>
+        <div id="microphone-pane" class="actions" hidden>
+          <button id="record">Record</button>
+          <button id="record-stop" disabled>Stop</button>
+        </div>
+        <audio id="clip-preview" controls preload="metadata" hidden></audio>
+        <p class="hint"><span id="clip-name">No audio yet.</span> <button id="clip-clear" class="link" hidden>Remove</button></p>
+      </fieldset>
       <label>Language<input id="transcription-language" placeholder="auto, or en, uk…" maxlength="35"></label>
       <div class="actions">
-        <button id="transcribe-file" disabled>Transcribe file</button>
-        <button id="record">Record</button>
-        <button id="record-stop" disabled>Stop</button>
+        <button id="transcribe" disabled>Transcribe</button>
       </div>
       <p id="transcription-status" role="status" aria-live="polite">Choose a file or record from the microphone.</p>
     </div>

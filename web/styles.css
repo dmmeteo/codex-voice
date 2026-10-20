@@ -30,5 +30,10 @@ button.link { border: 0; padding: 0; color: #555; text-decoration: underline; ba
 #events { list-style: none; margin: 8px 0 0; padding: 0; max-height: 60vh; overflow: auto; font: 12px/1.5 ui-monospace, monospace; }
 #events li { padding: 6px 0; border-bottom: 1px solid #eee; white-space: pre-wrap; overflow-wrap: anywhere; }
 #session-id { font: 11px ui-monospace, monospace; overflow-wrap: anywhere; }
+.audio-field { border: 1px solid #ccc; border-radius: 6px; padding: 10px 12px 12px; margin: 0; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.audio-field legend { font-size: 13px; color: #444; padding: 0 4px; }
+.source { display: flex; flex-wrap: wrap; gap: 16px; }
+#transcription-file { width: 100%; }
+#clip-preview { width: 100%; }
 [hidden] { display: none !important; }
 @media (max-width: 720px) { .split { grid-template-columns: 1fr; gap: 20px; } }

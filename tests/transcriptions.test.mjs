@@ -17,15 +17,16 @@ class Recorder {
 function fixture({fetch, getUserMedia} = {}) {
   const track = {stopped: false, stop() { this.stopped = true; }};
   const stream = {getTracks: () => [track]};
-  const states = [], texts = [], requests = [];
+  const states = [], texts = [], requests = [], clips = [];
   const session = new TranscriptionSession({
     onState: state => states.push(state),
     onText: text => texts.push(text),
+    onClip: clip => clips.push(clip),
     fetch: fetch ?? (async (url, init) => { requests.push({url, init}); return ok('fixture transcript'); }),
     getUserMedia: getUserMedia ?? (async () => stream),
     Recorder,
   });
-  return {session, track, stream, states, texts, requests};
+  return {session, track, stream, states, texts, requests, clips};
 }
 
 test('A file is posted as multipart with language, json format, and the local API key', async () => {
@@ -69,25 +70,29 @@ test('Choosing nothing reports it without a request', async () => {
   const f = fixture();
   await f.session.transcribeFile(undefined, {});
   assert.equal(f.requests.length, 0);
-  assert.equal(f.states.at(-1).detail, 'Choose an audio file first.');
+  assert.equal(f.states.at(-1).detail, 'Choose a file or record audio first.');
 });
 
-test('Recording releases the microphone on Stop and uploads the recording', async () => {
-  const upload = deferred();
-  const f = fixture({fetch: async (url, init) => { upload.resolve(init); return ok('spoken words'); }});
-  await f.session.startRecording({language: 'en', apiKey: ''});
+test('Stop releases the microphone and keeps the recording as the clip without uploading', async () => {
+  const f = fixture();
+  await f.session.startRecording();
   assert.equal(f.session.phase, 'recording');
   assert.equal(f.track.stopped, false);
   f.session.stop();
   assert.equal(f.track.stopped, true);
-  const init = await upload.promise;
-  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(f.requests.length, 0);
+  assert.deepEqual(f.states.map(s => s.phase), ['requesting', 'recording', 'stopping', 'idle']);
+  assert.equal(f.states.at(-1).detail, 'Recording ready. Play it back, then Transcribe.');
+  const [clip] = f.clips;
+  assert.equal(clip.name, 'recording.webm');
+  assert.equal(clip.type, 'audio/webm');
+  assert.equal(await clip.text(), 'opus-bytes');
+  await f.session.transcribeFile(clip, {language: 'en'});
+  const {init} = f.requests[0];
   assert.equal(init.body.get('file').name, 'recording.webm');
   assert.equal(init.body.get('file').type, 'audio/webm');
-  assert.equal(await init.body.get('file').text(), 'opus-bytes');
   assert.equal(init.body.get('language'), 'en');
-  assert.deepEqual(f.texts, ['spoken words']);
-  assert.deepEqual(f.states.map(s => s.phase), ['requesting', 'recording', 'uploading', 'uploading', 'idle']);
+  assert.deepEqual(f.texts, ['fixture transcript']);
 });
 
 test('Stop during the permission prompt releases a microphone granted later', async () => {
@@ -150,43 +155,81 @@ test('Denied, unsupported, empty, and failed recordings end idle with the microp
   assert.equal(Recorder.instances.at(-1).state, 'inactive');
 });
 
-test('The tab enables only the controls valid for each phase', async () => {
+test('One audio field: either source fills the clip, the preview plays it, and one Transcribe sends it', async () => {
   const html = await readFile(new URL('../web/index.html', import.meta.url), 'utf8');
   const document = fakeDocument(html);
   const $ = id => document.getElementById(id);
   let session;
   class Session {
-    constructor({onState, onText}) { this.onState = onState; this.onText = onText; this.phase = 'idle'; this.calls = []; session = this; }
+    constructor({onState, onText, onClip}) { Object.assign(this, {onState, onText, onClip, phase: 'idle', calls: []}); session = this; }
     setState(phase, detail = '') { this.phase = phase; this.onState({phase, detail}); }
-    transcribeFile(file, options) { this.calls.push(['file', file, options]); }
-    startRecording(options) { this.calls.push(['record', options]); }
+    transcribeFile(file, options) { this.calls.push(['transcribe', file, options]); }
+    startRecording() { this.calls.push(['record']); }
     stop() { this.calls.push(['stop']); }
+    cancel() { this.calls.push(['cancel']); }
   }
-  mountTranscriptions(document, {apiKey: () => 'local-key', Session});
-  assert.equal($('transcribe-file').disabled, true);
-  assert.equal($('record').disabled, false);
-  assert.equal($('record-stop').disabled, true);
-  $('transcription-file').files = [{name: 'a.wav'}];
+  mountTranscriptions(document, {apiKey: () => '', Session});
+  assert.equal($('source-upload').checked, true);
+  assert.equal($('upload-pane').hidden, false);
+  assert.equal($('microphone-pane').hidden, true);
+  assert.equal($('transcribe').disabled, true);
+  assert.equal($('clip-preview').hidden, true);
+
+  const file = new File(['RIFF'], 'clip.wav', {type: 'audio/wav'});
+  $('transcription-file').files = [file];
   $('transcription-file').listeners.change();
-  assert.equal($('transcribe-file').disabled, false);
-  $('transcription-language').value = 'uk';
-  $('transcribe-file').listeners.click();
-  assert.deepEqual(session.calls[0], ['file', {name: 'a.wav'}, {language: 'uk', apiKey: 'local-key'}]);
-  for (const phase of ['requesting', 'recording', 'uploading']) {
+  assert.equal(session.calls.length, 0, 'choosing a file sends nothing');
+  assert.equal($('clip-preview').hidden, false);
+  assert.match($('clip-preview').src, /^blob:/);
+  assert.equal($('clip-name').textContent, 'clip.wav · audio/wav');
+  assert.equal($('transcription-status').textContent, 'File ready. Play it back, then Transcribe.');
+  assert.equal($('transcribe').disabled, false);
+
+  $('source-microphone').checked = true;
+  $('source-upload').checked = false;
+  $('source-microphone').listeners.change();
+  assert.equal($('upload-pane').hidden, true);
+  assert.equal($('microphone-pane').hidden, false);
+  assert.equal(session.calls.length, 0, 'switching source sends nothing');
+  assert.equal($('transcribe').disabled, false, 'the clip survives a source switch');
+
+  $('record').listeners.click();
+  assert.deepEqual(session.calls.at(-1), ['record']);
+  assert.equal($('clip-preview').hidden, true, 'a new recording replaces the clip');
+  for (const phase of ['requesting', 'recording']) {
     session.setState(phase, phase);
-    assert.equal($('transcribe-file').disabled, true);
     assert.equal($('record').disabled, true);
     assert.equal($('record-stop').disabled, false);
-    assert.equal($('transcription-file').disabled, true);
-    assert.equal($('transcription-status').textContent, phase);
+    assert.equal($('transcribe').disabled, true);
+    assert.equal($('source-upload').disabled, true);
   }
-  assert.equal($('record-stop').textContent, 'Stop');
-  session.setState('recording');
-  assert.equal($('record-stop').textContent, 'Stop and transcribe');
   $('record-stop').listeners.click();
   assert.deepEqual(session.calls.at(-1), ['stop']);
+  session.setState('stopping', 'Preparing the recording…');
+  assert.equal($('record-stop').disabled, true);
+  const recording = new File(['opus'], 'recording.webm', {type: 'audio/webm'});
+  session.onClip(recording);
+  session.setState('idle', 'Recording ready. Play it back, then Transcribe.');
+  assert.equal($('clip-preview').hidden, false);
+  assert.equal($('clip-name').textContent, 'recording.webm · audio/webm');
+  assert.equal(session.calls.filter(c => c[0] === 'transcribe').length, 0, 'stopping sends nothing');
+
+  $('transcription-language').value = 'uk';
+  $('transcribe').listeners.click();
+  assert.deepEqual(session.calls.at(-1), ['transcribe', recording, {language: 'uk', apiKey: ''}]);
+  session.setState('uploading', 'Transcribing…');
+  assert.equal($('transcribe').textContent, 'Cancel');
+  assert.equal($('transcribe').disabled, false);
+  assert.equal($('transcription-language').disabled, true);
+  $('transcribe').listeners.click();
+  assert.deepEqual(session.calls.at(-1), ['cancel']);
+  session.setState('idle', 'Stopped.');
+  assert.equal($('transcribe').textContent, 'Transcribe');
   session.onText('result text');
   assert.equal($('transcription-text').textContent, 'result text');
-  session.setState('idle');
-  assert.equal($('record').disabled, false);
+
+  $('clip-clear').listeners.click();
+  assert.equal($('clip-preview').hidden, true);
+  assert.equal($('transcribe').disabled, true);
+  assert.equal($('clip-clear').hidden, true);
 });
