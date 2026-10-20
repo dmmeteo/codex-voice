@@ -14,7 +14,8 @@ main interface.
 This is not an official OpenAI integration or a separate source of subscription
 access. Your account must have access to the requested feature. Private service
 behavior can change. Codex Voice does not implement OpenAI's public Realtime
-API or native GPT-Live.
+API. Its separate GPT-Live subscription mode uses the reverse-engineered
+Quicksilver protocol and requires account access.
 
 > Upstream usage limits still apply. Codex Voice does not remove account limits
 > or provide unrestricted voice access. Availability depends on your plan,
@@ -115,6 +116,14 @@ playback locally. **Stop** closes the connection and releases the microphone.
 actual Wingman UI with newest-first bubbles. No upstream calls were made and no
 conversation was saved. This image does not verify API behavior.
 
+Choose **GPT-Live (subscription)** for the separate Quicksilver path. Accept its
+privacy notice before Start. The Save conversation switch does not apply because
+no no-history setting is verified for this protocol. GPT-Live uses a server-held
+sideband and browser-owned WebRTC audio. No backend agent or tools are attached.
+Account rejection is an error; the server never falls back to a paid API or
+another mode. Live audio acceptance and human microphone quality are separate
+from offline tests. See the [GPT-Live API contract](docs/api.md#subscription-gpt-live).
+
 The server's `POST /v1/realtime/sessions` accepts a JSON SDP offer and returns an
 answer. WebRTC carries audio and events after negotiation. A curl request alone
 cannot run a conversation. See the [voice guide](docs/voice.md) for lifecycle,
@@ -135,4 +144,5 @@ for an audio-only library. The crate is `codex_voice`.
 ## License
 
 [MIT](LICENSE-MIT). The inherited contributors' copyright and full permission
-notice remain unchanged.
+notice remain unchanged. Adapted protocol work is credited in
+[third-party notices](THIRD_PARTY_NOTICES.md).

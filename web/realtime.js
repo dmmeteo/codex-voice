@@ -1,7 +1,7 @@
 const MAX_EVENT_BYTES = 64 * 1024;
 
-export function normalizeEvent(raw) {
-  if (typeof raw !== 'string' || raw.length > MAX_EVENT_BYTES) return null;
+export function normalizeEvent(raw, limit = MAX_EVENT_BYTES) {
+  if (typeof raw !== 'string' || raw.length > limit) return null;
   try {
     let event = JSON.parse(raw);
     if (event?.type === 'data_message') {
@@ -27,6 +27,8 @@ export class RealtimeSession {
     this.recoveryTimer = null;
     this.readiness = null;
     this.sessionId = null;
+    this.control = null;
+    this.live = false;
   }
 
   setState(phase, detail = '') {
@@ -39,6 +41,7 @@ export class RealtimeSession {
     this.cleanup();
     const generation = this.generation;
     const current = () => generation === this.generation;
+    this.live = options.mode === 'gpt_live';
     this.readiness = {transportConnected: false, channelOpen: false, backendReady: options.mode === 'standard'};
     this.setState('starting', 'Requesting microphone access…');
     this.abort = new AbortController();
@@ -54,38 +57,40 @@ export class RealtimeSession {
       const peer = new RTCPeerConnection({bundlePolicy: 'max-bundle'});
       this.peer = peer;
       peer.addTransceiver(stream.getAudioTracks()[0], {direction: 'sendrecv', streams: [stream]});
-      const channel = peer.createDataChannel('', {negotiated: true, id: 0});
+      const channel = this.live ? null : peer.createDataChannel('', {negotiated: true, id: 0});
       this.channel = channel;
-      channel.onmessage = ({data}) => {
-        if (!current()) return;
-        const event = normalizeEvent(data);
-        if (!event) { this.onEvent({type: 'unrecognized_event', payload: {message: 'Ignored malformed or oversized data.'}}); return; }
-        this.onEvent(event);
-        if (event.type === 'startup_telemetry' && event.payload?.success === true) {
-          this.readiness.backendReady = true;
-          this.#updateReadiness();
-        }
-        if (event.type === 'goodbye') this.stop('The voice service ended the session.');
-        if (event.type === 'startup_telemetry' && event.payload?.success === false) {
-          this.fail(options.mode === 'advanced'
-            ? 'ChatGPT could not start Advanced voice. Try Standard mode.'
-            : 'ChatGPT could not start the voice conversation. Try again later.');
-        }
-        if (event.type === 'error') {
-          const message = typeof event.error?.message === 'string'
-            ? event.error.message.replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ').trim().slice(0, 240)
-            : '';
-          this.fail(message || 'The voice service reported an error. See the event log.');
-        }
-      };
-      channel.onopen = () => {
-        if (!current() || channel.readyState !== 'open') return;
-        this.readiness.channelOpen = true;
-        this.onEvent({type: 'data_channel_open'});
-        if (this.#sendMicrophoneState(generation)) this.#updateReadiness();
-      };
-      channel.onclose = () => { if (current()) this.fail('The voice data channel closed. Start a new session.'); };
-      channel.onerror = () => { if (current()) this.fail('The voice data channel failed. Start a new session.'); };
+      if (channel) {
+        channel.onmessage = ({data}) => {
+          if (!current()) return;
+          const event = normalizeEvent(data);
+          if (!event) { this.onEvent({type: 'unrecognized_event', payload: {message: 'Ignored malformed or oversized data.'}}); return; }
+          this.onEvent(event);
+          if (event.type === 'startup_telemetry' && event.payload?.success === true) {
+            this.readiness.backendReady = true;
+            this.#updateReadiness();
+          }
+          if (event.type === 'goodbye') this.stop('The voice service ended the session.');
+          if (event.type === 'startup_telemetry' && event.payload?.success === false) {
+            this.fail(options.mode === 'advanced'
+              ? 'ChatGPT could not start Advanced voice. Try Standard mode.'
+              : 'ChatGPT could not start the voice conversation. Try again later.');
+          }
+          if (event.type === 'error') {
+            const message = typeof event.error?.message === 'string'
+              ? event.error.message.replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ').trim().slice(0, 240)
+              : '';
+            this.fail(message || 'The voice service reported an error. See the event log.');
+          }
+        };
+        channel.onopen = () => {
+          if (!current() || channel.readyState !== 'open') return;
+          this.readiness.channelOpen = true;
+          this.onEvent({type: 'data_channel_open'});
+          if (this.#sendMicrophoneState(generation)) this.#updateReadiness();
+        };
+        channel.onclose = () => { if (current()) this.fail('The voice data channel closed. Start a new session.'); };
+        channel.onerror = () => { if (current()) this.fail('The voice data channel failed. Start a new session.'); };
+      }
       peer.ontrack = ({track, streams}) => {
         if (!current()) { track.stop(); return; }
         this.audio.srcObject = streams[0] || new MediaStream([track]);
@@ -112,6 +117,13 @@ export class RealtimeSession {
       await gatherIce(peer, signal);
       if (!current()) return;
       this.setState('starting', 'Connecting to ChatGPT…');
+      if (this.live) {
+        const result = await this.connectLive(options, apiKey, peer.localDescription.sdp, generation);
+        if (!current()) return;
+        this.sessionId = result.session_id;
+        await peer.setRemoteDescription({type: 'answer', sdp: result.sdp});
+        return;
+      }
       const headers = {'Content-Type': 'application/json'};
       if (apiKey.trim()) headers.Authorization = `Bearer ${apiKey.trim()}`;
       const response = await this.fetch('/v1/realtime/sessions', {method: 'POST', headers, signal, body: JSON.stringify({...options, sdp: peer.localDescription.sdp})});
@@ -131,6 +143,50 @@ export class RealtimeSession {
     }
   }
 
+  connectLive(options, apiKey, sdp, generation) {
+    return new Promise((resolve, reject) => {
+      const url = new URL('/v1/realtime/live', globalThis.location.href);
+      url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+      const control = new WebSocket(url);
+      this.control = control;
+      let answered = false;
+      control.onopen = () => {
+        if (generation !== this.generation) return;
+        control.send(JSON.stringify({api_key: apiKey.trim(), offer: {
+          sdp, voice: options.voice, enable_message_streaming: options.enable_message_streaming,
+          acknowledge_upstream_privacy: options.acknowledge_upstream_privacy === true,
+        }}));
+      };
+      control.onmessage = ({data}) => {
+        if (generation !== this.generation) return;
+        const event = normalizeEvent(data, 2 * 128 * 1024 + 4096);
+        if (!event) { reject(new Error('Invalid GPT-Live control event.')); this.fail('Invalid GPT-Live control event.'); return; }
+        if (event.type === 'answer') {
+          if (answered || typeof event.sdp !== 'string' || event.sdp.length > 128 * 1024 || typeof event.session_id !== 'string') {
+            reject(new Error('Invalid GPT-Live answer.')); this.fail('Invalid GPT-Live answer.'); return;
+          }
+          answered = true;
+          resolve(event);
+          return;
+        }
+        this.onEvent(event);
+        if (event.type === 'live_ready') {
+          this.readiness.channelOpen = this.readiness.backendReady = true;
+          this.#updateReadiness();
+        }
+        if (event.type === 'error') {
+          const message = event.error?.message || 'GPT-Live failed.';
+          reject(new Error(message));
+          this.fail(message);
+        }
+        if (event.type === 'session.closed') this.stop('GPT-Live ended the session.');
+      };
+      control.onerror = () => { reject(new Error('GPT-Live control connection failed.')); if (generation === this.generation) this.fail('GPT-Live control connection failed.'); };
+      control.onclose = () => { reject(new Error('GPT-Live control connection closed.')); if (generation === this.generation) this.fail('GPT-Live control connection closed. Start a new session.'); };
+      this.abort.signal.addEventListener('abort', () => reject(new DOMException('Stopped', 'AbortError')), {once:true});
+    });
+  }
+
   #updateReadiness() {
     if (this.phase !== 'starting') return;
     const {transportConnected, channelOpen, backendReady} = this.readiness;
@@ -145,6 +201,7 @@ export class RealtimeSession {
 
   #sendMicrophoneState(generation = this.generation) {
     if (generation !== this.generation) return false;
+    if (this.live) return true;
     if (this.channel?.readyState !== 'open') {
       this.fail('The voice data channel closed. Start a new session.');
       return false;
@@ -206,6 +263,12 @@ export class RealtimeSession {
     this.readiness = null;
     this.abort?.abort();
     this.abort = null;
+    if (this.control) {
+      this.control.onopen = this.control.onmessage = this.control.onclose = this.control.onerror = null;
+      try { if (this.control.readyState === 1) this.control.send('stop'); } catch {}
+      this.control.close();
+      this.control = null;
+    }
     if (this.channel) {
       this.channel.onclose = this.channel.onerror = this.channel.onmessage = this.channel.onopen = null;
       this.channel.close();
@@ -243,9 +306,19 @@ function gatherIce(peer, signal) {
 }
 
 export class TranscriptLog {
-  constructor() { this.entries = new Map(); this.channels = new Map(); this.previous = {c: 0, p: '', o: 'add'}; this.resolvedModelSlug = null; }
+  constructor() { this.entries = new Map(); this.channels = new Map(); this.previous = {c: 0, p: '', o: 'add'}; this.resolvedModelSlug = null; this.liveSequence = 0; }
 
   receive(event) {
+    if (event.type === 'live_transcript') {
+      if (!['user', 'assistant'].includes(event.role) || typeof event.text !== 'string') return;
+      this.liveTurns ??= new Map();
+      let id = this.liveTurns.get(event.role);
+      if (!id) { id = `live-${++this.liveSequence}-${event.role}`; this.liveTurns.set(event.role, id); }
+      const previous = this.entries.get(id)?.text || '';
+      this.put(id, event.role, event.append ? previous + event.text : event.text);
+      if (event.final) this.liveTurns.delete(event.role);
+      return;
+    }
     const payload = event.payload;
     if (!payload || typeof payload !== 'object') return;
     let messages = [];
@@ -345,11 +418,11 @@ export function mountRealtime(document, {apiKey, Session = RealtimeSession, now 
       $('phase').textContent = phase[0].toUpperCase() + phase.slice(1);
       $('status').textContent = detail;
       $('session-id').textContent = sessionId ? `Session ${sessionId}` : '';
-      renderStart();
       $('pause').disabled = !['active', 'paused'].includes(phase);
       $('pause').textContent = phase === 'paused' ? 'Resume' : 'Pause';
       $('stop').disabled = phase === 'idle';
-      for (const id of ['mode', 'voice', 'transcripts-enabled', 'save-conversation']) $(id).disabled = phase !== 'idle';
+      for (const id of ['mode', 'voice', 'transcripts-enabled', 'save-conversation', 'live-privacy']) $(id).disabled = phase !== 'idle';
+      renderStart();
     },
     onEvent: event => {
       const row = document.createElement('li');
@@ -367,14 +440,23 @@ export function mountRealtime(document, {apiKey, Session = RealtimeSession, now 
   });
 
   function canStart() {
-    return session.phase === 'idle' && ($('mode').value === 'standard' || $('save-conversation').checked);
+    return session.phase === 'idle' && ($('mode').value === 'gpt_live' ? $('live-privacy').checked : $('mode').value === 'standard' || $('save-conversation').checked);
   }
 
   const READY = 'Ready. Start to allow microphone access.';
   const historyRequired = () => `${$('mode').value[0].toUpperCase()}${$('mode').value.slice(1)} voice requires Save conversation. Turn it on, or choose Standard.`;
 
   function renderStart() {
+    const live = $('mode').value === 'gpt_live';
+    $('live-privacy-label').hidden = !live;
+    $('live-privacy').disabled = session.phase !== 'idle';
+    $('save-conversation').disabled = live || session.phase !== 'idle';
     $('start').disabled = !canStart();
+    if (live) {
+      $('save-help').textContent = 'GPT-Live history and retention are not verified. Save conversation does not apply. Accept upstream privacy semantics to start. No backend tools are attached.';
+      if (session.phase === 'idle' && (!canStart() || $('status').textContent.includes('requires') || $('status').textContent === READY)) $('status').textContent = canStart() ? READY : 'GPT-Live requires explicit privacy acknowledgement.';
+      return;
+    }
     if (session.phase === 'idle' && !canStart()) $('status').textContent = historyRequired();
     else if (session.phase === 'idle' && $('status').textContent.endsWith('requires Save conversation. Turn it on, or choose Standard.')) $('status').textContent = READY;
     $('save-help').textContent = $('save-conversation').checked
@@ -417,17 +499,19 @@ export function mountRealtime(document, {apiKey, Session = RealtimeSession, now 
     transcript = new TranscriptLog();
     renderTranscript();
     renderModel();
+    const live = $('mode').value === 'gpt_live';
     session.start({
       mode: $('mode').value,
-      voice: $('voice').value,
+      voice: live ? ({glimmer: 'sol', orbit: 'spruce', fathom: 'arbor'}[$('voice').value] || $('voice').value) : $('voice').value,
       enable_message_streaming: $('transcripts-enabled').checked,
-      history_and_training_disabled: !$('save-conversation').checked,
+      ...(live ? {acknowledge_upstream_privacy: $('live-privacy').checked} : {history_and_training_disabled: !$('save-conversation').checked}),
       timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
       timezone_offset_minutes: now().getTimezoneOffset(),
     }, apiKey());
   });
-  $('mode').addEventListener('change', renderStart);
+  $('mode').addEventListener('change', () => { if (session.phase === 'idle') $('status').textContent = READY; renderStart(); });
   $('save-conversation').addEventListener('change', renderStart);
+  $('live-privacy').addEventListener('change', renderStart);
   $('transcripts-enabled').addEventListener('change', renderModel);
   $('pause').addEventListener('click', () => session.phase === 'paused' ? session.resume() : session.pause());
   $('stop').addEventListener('click', () => session.stop());

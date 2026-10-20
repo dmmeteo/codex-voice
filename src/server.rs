@@ -48,6 +48,8 @@ pub struct UpstreamConfig {
 pub(crate) struct AppState {
     pub config: Arc<ServerConfig>,
     pub limiter: Arc<Semaphore>,
+    #[cfg(feature = "realtime")]
+    pub live_limiter: Arc<Semaphore>,
     browser_hosts: Arc<[String]>,
 }
 
@@ -88,6 +90,8 @@ pub fn router(config: ServerConfig, addr: SocketAddr) -> Router {
     let max_upload_bytes = config.max_upload_bytes;
     let state = AppState {
         limiter: Arc::new(Semaphore::new(config.concurrency)),
+        #[cfg(feature = "realtime")]
+        live_limiter: Arc::new(Semaphore::new(config.concurrency)),
         browser_hosts: browser_hosts.into(),
         config: Arc::new(config),
     };
@@ -105,10 +109,15 @@ pub fn router(config: ServerConfig, addr: SocketAddr) -> Router {
         .route("/realtime.js", get(web::realtime_js))
         .route("/styles.css", get(web::styles));
     #[cfg(feature = "realtime")]
-    let browser = browser.route(
-        "/v1/realtime/sessions",
-        post(crate::realtime::routes::create_session),
-    );
+    let browser = browser
+        .route(
+            "/v1/realtime/live",
+            get(crate::realtime::live_routes::connect),
+        )
+        .route(
+            "/v1/realtime/sessions",
+            post(crate::realtime::routes::create_session),
+        );
     let browser = browser.layer(middleware::from_fn_with_state(
         state.clone(),
         guard_browser_origin,

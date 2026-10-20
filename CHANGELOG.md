@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Add subscription GPT-Live through a connection-owned authenticated control
+  WebSocket and browser WebRTC audio. Keep legacy signaling and transcription.
+- Require a separate GPT-Live privacy acknowledgement. Do not claim a no-history
+  setting or automatically fall back to another auth source or mode.
+- Project sideband events without upstream session capabilities and report
+  unavailable delegation honestly when no backend agent is attached.
+- Include Hermes Talk and OpenClaw attribution in distribution notices.
 - Reorganize the Rust library and server into shared auth/server and separate
   audio/realtime domains. Rename the package/binary to `codex-voice`, crate to
   `codex_voice`, and application environment variables to `CODEX_VOICE_*`.

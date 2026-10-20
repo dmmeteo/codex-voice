@@ -9,9 +9,10 @@ The included browser demo lets you test your local server and account access
 without writing a client. It is an optional test client, not the main product.
 For your own client, use the HTTP API described in `docs/api.md`.
 
-For voice conversations, the server handles signaling. WebRTC is the transport
-for ongoing audio and events directly between the client and the upstream
-service, not the purpose of Codex Voice.
+For voice conversations, the server handles signaling. WebRTC carries audio
+directly between the client and upstream. The three legacy modes also carry
+events over WebRTC. Subscription GPT-Live uses a server-held sideband for events
+and control. WebRTC is a transport detail, not the purpose of Codex Voice.
 
 This guide also ships as `VOICE.md` in the macOS package. The package README
 explains the launcher. The repository's `docs/api.md` and
@@ -28,7 +29,8 @@ explains the launcher. The repository's `docs/api.md` and
 3. In **Realtime**, choose a mode and voice. Wingman and Cove are the defaults.
    **Save conversation** starts off. Wingman and Advanced require you to enable
    saving explicitly. To keep saving off, choose Standard. **Transcripts** starts
-   on and requests text independently of saving.
+   on and requests text independently of saving. GPT-Live instead requires the
+   separate privacy acknowledgement described below.
 4. Click **Start**, allow microphone access, and wait for **Active**. A successful
    HTTP response alone does not establish readiness. Settings stay locked until
    the session ends.
@@ -115,7 +117,7 @@ An STT adapter can post multipart audio to `/v1/audio/transcriptions` and read
 `{"text":"..."}`. A sent `model` value is ignored. The repository's Python and
 Node SDK examples demonstrate this request format.
 
-Native Hermes GPT-Live uses a different signaling and delegation contract.
+A Hermes GPT-Live integration needs its own signaling and delegation adapter.
 Changing a base URL or model name does not translate that protocol. A bridge
 needs media handling, event translation, delegation, and live acceptance.
 Discord voice channels also need their own audio transport integration.
@@ -163,3 +165,29 @@ conversation rendered offline in the actual UI. The illustration made no
 upstream calls and does not verify API behavior. A prior Standard WebRTC capture
 used public sample audio with saving off. That observation does not establish
 full acceptance for every mode or browser.
+
+## Test subscription GPT-Live
+
+Choose **GPT-Live (subscription)** and read its privacy notice. Accept the notice,
+then click **Start**. Microphone permission is requested only after that click.
+The demo waits for connected WebRTC media and a connected server sideband. It
+plays the remote audio track and displays projected user and assistant transcripts.
+**Pause** mutes the local microphone and playback. **Resume** restores both.
+**Stop**, startup failure, and leaving the page release tracks and close both
+connections. A one-hour server limit also ends the control connection.
+
+The Save conversation switch is disabled for GPT-Live. Its protocol has no
+verified no-history setting, so the UI makes no no-saving guarantee. The notice
+is a separate acknowledgement and leaves your existing mode saving choice intact.
+Transcripts off suppresses forwarding transcript text from the server; it does
+not change upstream processing or retention.
+
+This integration has no task execution backend. Client delegations receive a
+clear unavailable response. It does not run Hermes, Discord, tools, or a paid
+Responses backend. The subscription request model does not prove model identity,
+quota, or price. An upstream rejection remains a failed connection.
+
+Offline Rust mocks and a synthetic browser media pair verify local behavior.
+Only a real subscription session with public input speech and decodable received
+audio can establish live duplex acceptance. Human microphone quality remains an
+operator check on the private HTTPS preview.

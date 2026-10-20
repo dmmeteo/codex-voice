@@ -23,14 +23,16 @@ pub enum RealtimeMode {
     #[default]
     Advanced,
     Wingman,
+    GptLive,
 }
 
 impl RealtimeMode {
-    fn path(self) -> &'static str {
+    fn path(self) -> Result<&'static str, RealtimeError> {
         match self {
-            Self::Standard => "/realtime/vps",
-            Self::Advanced => "/realtime/vp",
-            Self::Wingman => "/realtime/wm",
+            Self::Standard => Ok("/realtime/vps"),
+            Self::Advanced => Ok("/realtime/vp"),
+            Self::Wingman => Ok("/realtime/wm"),
+            Self::GptLive => Err(RealtimeError::InvalidOffer("GPT-Live requires the /v1/realtime/live WebSocket and explicit privacy acknowledgement")),
         }
     }
 }
@@ -200,9 +202,9 @@ impl Default for RealtimeClientConfig {
 
 #[derive(Clone)]
 pub struct RealtimeClient {
-    http: Client,
-    auth: CodexAuth,
-    upstream: Url,
+    pub(super) http: Client,
+    pub(super) auth: CodexAuth,
+    pub(super) upstream: Url,
 }
 
 impl RealtimeClient {
@@ -240,6 +242,7 @@ impl RealtimeClient {
         offer: RealtimeOffer,
     ) -> Result<RealtimeAnswer, RealtimeError> {
         offer.validate()?;
+        let path = offer.mode.path()?;
         let session_id = Uuid::new_v4().to_string();
         let headers = self.auth_headers()?;
         let mut status_url = self.upstream.clone();
@@ -310,7 +313,7 @@ impl RealtimeClient {
             session["backend_reasoning_effort"] = json!("instant");
         }
         let mut url = self.upstream.clone();
-        url.set_path(offer.mode.path());
+        url.set_path(path);
         url.set_query(Some("dcid=0"));
         if let Some(token) = status
             .pointer("/chatreq/token")
@@ -338,7 +341,7 @@ impl RealtimeClient {
             session_id,
         })
     }
-    fn auth_headers(&self) -> Result<header::HeaderMap, RealtimeError> {
+    pub(super) fn auth_headers(&self) -> Result<header::HeaderMap, RealtimeError> {
         let mut headers = header::HeaderMap::new();
         let mut bearer =
             header::HeaderValue::from_str(&format!("Bearer {}", self.auth.access_token))
@@ -369,7 +372,7 @@ impl RealtimeClient {
     }
 }
 
-async fn read_response(response: wreq::Response) -> Result<String, RealtimeError> {
+pub(super) async fn read_response(response: wreq::Response) -> Result<String, RealtimeError> {
     let status = response.status().as_u16();
     let html = response
         .headers()
@@ -414,7 +417,7 @@ async fn read_response(response: wreq::Response) -> Result<String, RealtimeError
     Ok(body)
 }
 
-fn transport_error(error: wreq::Error) -> RealtimeError {
+pub(super) fn transport_error(error: wreq::Error) -> RealtimeError {
     if error.is_timeout() {
         RealtimeError::Timeout
     } else {

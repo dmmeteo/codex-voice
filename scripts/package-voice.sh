@@ -69,6 +69,7 @@ cp "$repo_dir/packaging/voice/start.command" "$stage/start.command"
 cp "$repo_dir/packaging/voice/README.md" "$stage/README.md"
 cp "$repo_dir/docs/voice.md" "$stage/VOICE.md"
 cp "$repo_dir/LICENSE-MIT" "$stage/LICENSE-MIT"
+cp "$repo_dir/THIRD_PARTY_NOTICES.md" "$stage/THIRD_PARTY_NOTICES.md"
 chmod 755 "$stage/codex-voice" "$stage/start.command"
 binary_sha=$(shasum -a 256 "$stage/codex-voice" | awk '{ print $1 }')
 cat >> "$stage/README.md" <<EOF

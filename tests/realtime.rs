@@ -338,3 +338,13 @@ fn credentials_are_redacted_in_debug() {
     assert!(!output.contains("private-token"));
     assert!(!output.contains("private-account"));
 }
+
+#[tokio::test]
+async fn gpt_live_cannot_accidentally_use_the_legacy_signaling_contract() {
+    let (client, state, task) = setup(StatusCode::CREATED, "application/sdp", SDP.into()).await;
+    let offer = serde_json::from_value(json!({"sdp":SDP,"mode":"gpt_live"})).unwrap();
+    let error = client.create_session(offer).await.unwrap_err();
+    assert!(error.to_string().contains("/v1/realtime/live WebSocket"));
+    assert!(state.captured.lock().unwrap().is_empty());
+    task.abort();
+}

@@ -38,7 +38,7 @@ test('Save conversation is an accessible switch that starts unchecked', () => {
 test('Wingman is the only preselected mode', () => {
   const select = html.match(/<select id="mode">.*?<\/select>/)?.[0];
   assert.deepEqual([...select.matchAll(/<option value="(\w+)"( selected)?>/g)].map(([, value, selected]) => [value, Boolean(selected)]),
-    [['standard', false], ['advanced', false], ['wingman', true]]);
+    [['standard', false], ['advanced', false], ['wingman', true], ['gpt_live', false]]);
 });
 
 test('Defaults are Wingman, Cove, transcripts on, and Save off, so Start waits for explicit saving', () => {

@@ -72,6 +72,8 @@ HTML, static assets, and realtime signaling check the exact Host authority.
 They also reject a supplied Origin whose authority differs from Host.
 Transcription checks same-origin browser requests without an exact Host allowlist.
 Health and static assets do not require a local key. Both POST handlers check it.
+GPT-Live authenticates its first WebSocket frame within 10 seconds, before using
+the subscription login.
 Forwarded headers do not authorize a request.
 
 Additional proxy authorities require a key. With `CODEX_VOICE_API_KEY` supplied:
@@ -101,3 +103,10 @@ optional upstream proxy use the variables in the tables above.
 
 The Compose image reference does not establish that a particular image has
 passed manual acceptance. Publication and deployment remain separate decisions.
+
+GPT-Live uses the same server-held subscription auth source and requires an account
+identity. It connects to the Quicksilver call endpoint on `chatgpt.com` and the
+trusted sideband on `api.openai.com`. There is no browser-supplied upstream URL.
+A server-owned nondefault `RealtimeClientConfig.upstream_base` directs controlled
+tests to that base, including its `/v1/live/{id}` sideband. The sideband requires
+direct WebSocket egress; the HTTP proxy setting applies to negotiation.

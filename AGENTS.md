@@ -18,8 +18,11 @@ integration boundaries. Read ROADMAP.md when changing unfinished accepted work.
   alias was removed after installed-client verification. Do not restore it
   without a verified consumer requirement.
 - `POST /v1/realtime/sessions` is private ChatGPT JSON SDP signaling. It is not
-  public OpenAI Realtime or native GPT-Live compatibility. `session_id` is for
-  correlation. WebRTC owns media/events; the client owns Pause and Stop.
+  public OpenAI Realtime compatibility. The additive `/v1/realtime/live` WebSocket
+  owns subscription Quicksilver control and its trusted sideband. Its first frame
+  authenticates the local key; upstream capabilities remain server-held.
+  `session_id` is for local correlation. WebRTC owns media; legacy events use
+  its data channel. The client owns Pause and Stop.
 - Default to loopback `127.0.0.1:2600` with configurable host/port. Keep the
   default concurrency 1, multipart body limit 10 MiB, and request/connect
   timeouts 120/10 seconds. The body limit includes multipart overhead.
@@ -28,7 +31,9 @@ integration boundaries. Read ROADMAP.md when changing unfinished accepted work.
   Preserve Host/Origin checks and do not trust forwarded headers as authorization.
 - The demo defaults to Wingman with Save conversation off. Wingman and Advanced
   require explicit saving in the UI. Standard can run without it. The JSON API
-  defaults to Advanced and does not enforce the UI saving requirement.
+  defaults to Advanced and does not enforce the UI saving requirement. GPT-Live
+  requires its own explicit privacy acknowledgement because no no-history field
+  is verified. The Save conversation switch does not apply to that mode.
 - Keep saving to ChatGPT history an explicit user choice. Keep upstream tokens,
   private tickets, account identifiers, and auth contents out of browser data,
   public docs, examples, and reports.

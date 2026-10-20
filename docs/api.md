@@ -8,6 +8,7 @@
 | `GET /healthz` | No body | `{"status":"ok"}`, no key check. Does not probe upstream readiness. |
 | `POST /v1/audio/transcriptions` | Multipart audio upload | Transcript, local key when configured. Cross-site browser requests are rejected. |
 | `POST /v1/realtime/sessions` | JSON audio SDP offer and options | JSON answer and correlation ID, local key when configured, Host/Origin checks. |
+| `GET /v1/realtime/live` | WebSocket upgrade, then authenticated start frame | Subscription GPT-Live control, SDP answer and safe events. |
 | `GET /` | No body | Static HTML demo, Host/Origin checks, no key check. |
 | `GET /index.js`, `GET /transcriptions.js`, `GET /realtime.js`, `GET /styles.css` | No body | Static assets with the same checks as the HTML. |
 
@@ -105,3 +106,56 @@ its permit after signaling, without limiting the lifetime of the media session.
 The [configuration reference](configuration.md) describes authentication and
 browser access checks. The [voice guide](voice.md) describes WebRTC lifecycle
 and event handling.
+
+## Subscription GPT-Live
+
+`GET /v1/realtime/live` upgrades to a WebSocket. This public client API uses the
+same Host and Origin checks as signaling. It is separate from the three legacy
+modes on `POST /v1/realtime/sessions`. That POST rejects `gpt_live` with guidance
+to use the WebSocket.
+
+Within 10 seconds, send one JSON text frame. The local key travels inside this
+frame because browser WebSocket clients cannot set an Authorization header.
+Never put the key in the URL or a WebSocket subprotocol.
+
+```json
+{"api_key":"<local server key>","offer":{"sdp":"<complete audio offer>","voice":"cove","acknowledge_upstream_privacy":true,"enable_message_streaming":true}}
+```
+
+Unknown fields are rejected. `sdp` has the existing 128 KiB validation and the
+start frame has a 266,240-byte limit. `voice` is required and must be `arbor`,
+`breeze`, `cove`, `ember`, `juniper`, `maple`, `sol`, `spruce`, or `vale`.
+`enable_message_streaming` defaults to true. Privacy acknowledgement must be true.
+There is no verified no-history option. Existing modes retain their history
+controls; acknowledging this notice does not toggle or promise ChatGPT saving.
+
+The server requests `gpt-live-1-codex` with client delegation using the existing
+subscription login and account identity. This is a request identifier, not proof
+of the served backend. It does not use project API keys or mode fallback.
+The upstream call ID, sideband authorization, raw upstream events, and session
+capabilities stay on the server. The client receives only:
+
+- `answer` with `sdp` and a fresh local correlation `session_id`.
+- `live_ready` after the trusted sideband connects. The client must also wait for
+  WebRTC connection before presenting Active. This does not prove audio playback.
+- `session.started` and `session.closed` without upstream session metadata.
+- `live_transcript` with `role`, `text`, `append`, and `final`. Deltas append;
+  snapshots replace the current speaker turn; a final turn completes it.
+- `delegation_unavailable` when a client delegation receives an honest response
+  that no backend agent or tools are connected.
+- `error` with a bounded server-owned message, followed by socket closure.
+
+Use an audio sendrecv transceiver without the legacy negotiated data channel.
+GPT-Live rejects offers with an application media section.
+WebRTC carries microphone and output audio. Pause mutes capture and playback
+locally. Send the text frame `stop` or close the control socket to release the
+sideband. Stop and failure must also close the peer and stop all local tracks.
+The server requests upstream `session.close` and closes its socket within a
+bounded timeout. A disconnected transport does not prove upstream finalization.
+The local session lifetime is at most one hour.
+
+At most `--concurrency` control connections can be open, including connections
+waiting for authentication. Capacity rejection is HTTP 429. After upgrade,
+authentication and validation failures are `error` events, not HTTP statuses.
+Negotiation shares the existing HTTP concurrency permit and releases it before
+ongoing media. Active GPT-Live sessions do not reserve that permit.

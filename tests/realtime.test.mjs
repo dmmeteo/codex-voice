@@ -406,3 +406,76 @@ test('A 401 JSON error from the local key check gets the same guidance', async (
   await f.session.start({mode: 'standard'});
   assert.match(f.states.at(-1).detail, /^Authentication failed \(401\)\./);
 });
+
+test('GPT-Live owns a local authenticated control socket and cleans media on Stop and rejection', async () => {
+  const sockets = [];
+  globalThis.location = new URL('https://voice.example/');
+  globalThis.WebSocket = class {
+    constructor(url) { this.url = String(url); this.readyState = 0; this.sent = []; sockets.push(this); queueMicrotask(() => { this.readyState = 1; this.onopen?.(); }); }
+    send(text) {
+      this.sent.push(text);
+      if (text === 'stop') return;
+      const start = JSON.parse(text);
+      assert.equal(start.api_key, 'local-key');
+      assert.equal(start.offer.acknowledge_upstream_privacy, true);
+      assert.equal('history_and_training_disabled' in start.offer, false);
+      queueMicrotask(() => {
+        this.onmessage?.({data: JSON.stringify({type:'answer', sdp:'v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\n', session_id:'local-id'})});
+        this.onmessage?.({data: JSON.stringify({type:'live_ready'})});
+      });
+    }
+    close() { this.closed = true; this.readyState = 3; }
+  };
+  const f = fixture();
+  microphone(async () => f.stream);
+  await f.session.start({mode:'gpt_live', voice:'cove', acknowledge_upstream_privacy:true, enable_message_streaming:true}, 'local-key');
+  assert.equal(f.session.phase, 'active');
+  assert.equal(f.session.channel, null);
+  assert.equal(sockets[0].url, 'wss://voice.example/v1/realtime/live');
+  assert.equal(f.session.sessionId, 'local-id');
+  f.session.pause();
+  assert.equal(f.track.enabled, false);
+  assert.equal(f.audio.muted, true);
+  f.session.resume();
+  assert.equal(f.track.enabled, true);
+  assert.equal(f.audio.muted, false);
+  sockets[0].onmessage({data: JSON.stringify({type:'error', error:{message:'ChatGPT rejected the voice session (HTTP 403)'}})});
+  assert.equal(f.session.phase, 'idle');
+  assert.equal(f.track.stopped, true);
+  assert.equal(sockets[0].closed, true);
+  assert.equal(sockets[0].sent.at(-1), 'stop');
+  assert.equal(f.session.timer, null);
+  assert.equal(f.states.at(-1).detail, 'ChatGPT rejected the voice session (HTTP 403)');
+});
+
+test('GPT-Live Stop during signaling settles start and closes the pending socket', async () => {
+  let socket;
+  globalThis.location = new URL('https://voice.example/');
+  globalThis.WebSocket = class {
+    constructor() { socket = this; this.readyState = 0; }
+    close() { this.closed = true; }
+  };
+  const f = fixture();
+  microphone(async () => f.stream);
+  const pending = f.session.start({mode:'gpt_live'});
+  await new Promise(resolve => setImmediate(resolve));
+  f.session.stop();
+  await pending;
+  assert.equal(socket.closed, true);
+  assert.equal(f.track.stopped, true);
+  assert.equal(f.session.phase, 'idle');
+  assert.equal(f.session.control, null);
+});
+
+test('A failed GPT-Live Stop send still releases the microphone and peer', () => {
+  const f = fixture();
+  f.session.control={readyState:1,send(){throw new Error('transport lost');},close(){this.closed=true;}};
+  f.session.stream=f.stream;
+  f.session.peer={close(){this.closed=true;}};
+  const control=f.session.control,peer=f.session.peer;
+  f.session.stop();
+  assert.equal(control.closed,true);
+  assert.equal(peer.closed,true);
+  assert.equal(f.track.stopped,true);
+  assert.equal(f.session.phase,'idle');
+});

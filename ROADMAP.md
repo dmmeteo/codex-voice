@@ -32,5 +32,9 @@ Release acceptance and deployment remain separate.
   release owner must verify the gate before invoking them.
 - [ ] Run deployment-specific final checks and authorize service replacement
   separately from source publication.
+- [x] Add a distinct subscription GPT-Live control and media test-client path,
+  with explicit privacy acknowledgement and no task execution backend.
+- [ ] Include subscription GPT-Live input and decodable output audio in the
+  release acceptance record, alongside manual microphone quality acceptance.
 - [ ] Implement and live-test a Hermes GPT-Live or Discord voice bridge if needed.
   File transcription compatibility does not provide those media transports.

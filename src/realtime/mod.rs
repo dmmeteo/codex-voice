@@ -1,7 +1,13 @@
-//! Realtime voice: SDP offer/answer signaling with ChatGPT's private voice
-//! service and the `POST /v1/realtime/sessions` route. Audio and events flow
-//! directly between the caller's WebRTC peer and the service.
+//! Voice signaling and subscription control. Legacy modes use JSON SDP on
+//! `POST /v1/realtime/sessions`; GPT-Live uses `/v1/realtime/live` with a trusted
+//! server-held sideband. The caller owns WebRTC audio and its lifecycle.
 mod client;
+#[cfg(feature = "server")]
+mod live;
+#[cfg(feature = "server")]
+pub(crate) mod live_routes;
+#[cfg(feature = "server")]
+pub use live::LiveOffer;
 #[cfg(feature = "server")]
 pub(crate) mod routes;
 

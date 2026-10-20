@@ -30,6 +30,7 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/* && \
     useradd --system --uid 10001 --gid nogroup --home-dir /nonexistent --shell /usr/sbin/nologin codex-voice
 
+COPY LICENSE-MIT THIRD_PARTY_NOTICES.md /usr/share/doc/codex-voice/
 COPY --from=builder /usr/local/bin/codex-voice /usr/local/bin/codex-voice
 COPY --from=builder /usr/local/bin/rust-silk /usr/local/bin/rust-silk
 
