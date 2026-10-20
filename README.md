@@ -1,11 +1,20 @@
 # Codex Voice
 
-Transcribe audio files and talk over WebRTC using your Codex ChatGPT login.
-Codex Voice is an unofficial Rust library, CLI, and HTTP server with a small
-static browser demo. The server keeps upstream credentials out of the browser.
+Codex Voice is an unofficial Rust server that uses your existing Codex ChatGPT
+subscription login for audio transcription and voice conversations. It
+reproduces the reverse-engineered flow used by the ChatGPT app through private
+ChatGPT services. A Rust library and CLI are also included.
 
-The project uses private ChatGPT services, whose access and behavior can change.
-It does not implement OpenAI's public Realtime API or native GPT-Live.
+The server is the main product. Use its HTTP API from your own client, or open
+the included browser demo to test transcription, voice mode, and whether your
+account can access the requested features. You do not need to build a client
+just to try the server. The demo is an optional convenience, not the product's
+main interface.
+
+This is not an official OpenAI integration or a separate source of subscription
+access. Your account must have access to the requested feature. Private service
+behavior can change. Codex Voice does not implement OpenAI's public Realtime
+API or native GPT-Live.
 
 > Upstream usage limits still apply. Codex Voice does not remove account limits
 > or provide unrestricted voice access. Availability depends on your plan,
@@ -79,9 +88,11 @@ The [curl](examples/curl.sh), [Python](examples/python_openai_sdk.py), and
 
 ## Use the browser demo
 
-The white, two-tab demo uses the ordinary public API. In **Transcriptions**,
-upload a file or select **Microphone**, record, and click **Stop**. Preview the
-audio, then click **Transcribe**. Recording does not automatically upload audio.
+The optional, two-tab demo uses the server's documented HTTP API. It lets you
+test your local server and account access without writing a client. In
+**Transcriptions**, upload a file or select **Microphone**, record, and click
+**Stop**. Preview the audio, then click **Transcribe**. Recording does not
+automatically upload audio.
 
 ![File transcription of public sample speech](docs/screenshots/transcriptions.png)
 

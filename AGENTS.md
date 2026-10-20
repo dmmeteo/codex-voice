@@ -6,9 +6,14 @@ integration boundaries. Read ROADMAP.md when changing unfinished accepted work.
 
 ## Accepted rules
 
-- Keep this a Rust library, CLI, and server with an optional tiny static
-  JavaScript demo. The demo uses the ordinary public API. Add no demo
-  configuration, session, or event application endpoints. Static assets are allowed.
+- Present Codex Voice as an unofficial server that reproduces reverse-engineered
+  ChatGPT app flows for transcription and voice conversations using an existing
+  Codex ChatGPT subscription login. Feature access and upstream limits still apply.
+  The Rust library and CLI are additional entry points. The optional tiny static
+  JavaScript demo lets self-hosters test their server and account access without
+  writing a client. WebRTC is a transport detail, not the product's purpose.
+  The demo uses the server's documented HTTP API. Add no demo configuration,
+  session, or event application endpoints. Static assets are allowed.
 - Keep `POST /v1/audio/transcriptions` canonical. The historical unversioned
   alias was removed after installed-client verification. Do not restore it
   without a verified consumer requirement.

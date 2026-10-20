@@ -2,6 +2,10 @@
 
 ## Authentication
 
+Codex Voice uses an existing Codex ChatGPT subscription login to access private
+ChatGPT transcription and voice services. The optional browser demo is a test
+client for the server. It does not provide account access or a separate quota.
+
 The Codex ChatGPT login authenticates upstream requests. The local server key
 protects the two POST endpoints. They are separate credentials.
 

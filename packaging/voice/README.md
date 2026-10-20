@@ -1,7 +1,13 @@
 # Codex Voice for macOS
 
-This local package runs the `codex-voice` server and its web client. It uses
-your existing Codex Desktop login. The package contains no credentials.
+This local package runs the unofficial `codex-voice` server for transcription
+and voice conversations through reverse-engineered private ChatGPT services.
+It uses your existing Codex Desktop ChatGPT login and the feature access of
+that account. The package contains no credentials.
+
+The included browser demo is optional. Open it to test your local server and
+account access without building a client. You can also use the server's HTTP
+API directly. The server is the product; the browser page is a test client.
 
 1. Extract the ZIP and keep its five files together.
 2. In Terminal, run `./start.command` from the extracted folder. To use another

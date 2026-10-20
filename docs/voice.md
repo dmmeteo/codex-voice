@@ -1,8 +1,17 @@
 # Voice client guide
 
-Codex Voice uploads audio files for transcription and negotiates private ChatGPT
-voice sessions. The Rust server handles signaling. WebRTC carries ongoing audio
-and events directly between the client and the upstream service.
+Codex Voice is an unofficial server for transcription and voice conversations
+using an existing Codex ChatGPT subscription login. It reproduces the
+reverse-engineered ChatGPT app flow through private services. Your account's
+feature access and upstream usage limits still apply.
+
+The included browser demo lets you test your local server and account access
+without writing a client. It is an optional test client, not the main product.
+For your own client, use the HTTP API described in `docs/api.md`.
+
+For voice conversations, the server handles signaling. WebRTC is the transport
+for ongoing audio and events directly between the client and the upstream
+service, not the purpose of Codex Voice.
 
 This guide also ships as `VOICE.md` in the macOS package. The package README
 explains the launcher. The repository's `docs/api.md` and
