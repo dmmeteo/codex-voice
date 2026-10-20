@@ -338,6 +338,7 @@ const MAX_EVENT_ROWS = 150;
 export function mountRealtime(document, {apiKey, Session = RealtimeSession, now = () => new Date()} = {}) {
   const $ = id => document.getElementById(id);
   let transcript = new TranscriptLog();
+  const transcriptRows = new Map();
   const session = new Session({
     audio: $('remote-audio'),
     onState: ({phase, detail, sessionId}) => {
@@ -352,7 +353,11 @@ export function mountRealtime(document, {apiKey, Session = RealtimeSession, now 
     },
     onEvent: event => {
       const row = document.createElement('li');
-      row.textContent = `${now().toLocaleTimeString()}  ${event.type}\n${JSON.stringify(event.payload ?? event, null, 2).slice(0, 4000)}`;
+      const heading = document.createElement('div');
+      const body = document.createElement('pre');
+      heading.textContent = `${now().toLocaleTimeString()}  ${event.type}`;
+      body.textContent = JSON.stringify(event.payload ?? event, null, 2).slice(0, 4000);
+      row.append(heading, body);
       $('events').prepend(row);
       while ($('events').children.length > MAX_EVENT_ROWS) $('events').lastChild.remove();
       transcript.receive(event);
@@ -379,19 +384,26 @@ export function mountRealtime(document, {apiKey, Session = RealtimeSession, now 
         : 'This mode requires saving to ChatGPT history. Turn on Save conversation, or choose Standard.';
   }
 
+  // Rows are edited in place and new ones prepended so streaming never rebuilds the list under the reader.
   function renderTranscript() {
-    const rows = [];
-    for (const {role, text} of transcript.entries.values()) {
-      const row = document.createElement('article');
-      const label = document.createElement('strong');
-      const body = document.createElement('p');
-      label.textContent = role === 'user' ? 'You' : role === 'assistant' ? 'ChatGPT' : role;
-      body.textContent = text;
-      row.append(label, body);
-      rows.push(row);
+    for (const [id, row] of transcriptRows) {
+      if (!transcript.entries.has(id)) { row.remove(); transcriptRows.delete(id); }
     }
-    $('transcripts').replaceChildren(...rows);
-    $('transcript-empty').hidden = rows.length > 0;
+    for (const [id, {role, text}] of transcript.entries) {
+      let row = transcriptRows.get(id);
+      if (!row) {
+        row = document.createElement('article');
+        row.append(document.createElement('strong'), document.createElement('p'));
+        transcriptRows.set(id, row);
+        $('transcripts').prepend(row);
+      }
+      const [label, body] = row.children;
+      const speaker = role === 'user' ? 'You' : role === 'assistant' ? 'ChatGPT' : role;
+      row.dataset.role = role;
+      if (label.textContent !== speaker) label.textContent = speaker;
+      if (body.textContent !== text) body.textContent = text;
+    }
+    $('transcript-empty').hidden = transcriptRows.size > 0;
   }
 
   function renderModel() {
