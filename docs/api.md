@@ -139,8 +139,8 @@ capabilities stay on the server. The client receives only:
 - `live_ready` after the trusted sideband connects. The client must also wait for
   WebRTC connection before presenting Active. This does not prove audio playback.
 - `session.started` and `session.closed` without upstream session metadata.
-- `live_transcript` with `role`, `text`, `append`, and `final`. Deltas append;
-  snapshots replace the current speaker turn; a final turn completes it.
+- `live_transcript` with `role`, `text`, `append`, and `final`. Fragments append;
+  a final turn replaces the accumulated text and completes it.
 - `delegation_unavailable` when a client delegation receives an honest response
   that no backend agent or tools are connected.
 - `error` with a bounded server-owned message, followed by socket closure.

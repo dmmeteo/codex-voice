@@ -210,8 +210,8 @@ fn public_event(event: &Value, streaming: bool, secrets: &[&str]) -> Option<Valu
     let (role, text, append, finality) = match kind {
         "session.input_transcript.delta" => ("user", event["delta"].as_str()?, true, false),
         "session.output_transcript.delta" => ("assistant", event["delta"].as_str()?, true, false),
-        "input_transcript.added" => ("user", event["item"]["text"].as_str()?, false, false),
-        "output_transcript.added" => ("assistant", event["item"]["text"].as_str()?, false, false),
+        "input_transcript.added" => ("user", event["item"]["text"].as_str()?, true, false),
+        "output_transcript.added" => ("assistant", event["item"]["text"].as_str()?, true, false),
         "turn.done" => (
             event["turn"]["role"].as_str()?,
             event["turn"]["transcript"].as_str()?,
@@ -234,6 +234,30 @@ fn public_event(event: &Value, streaming: bool, secrets: &[&str]) -> Option<Valu
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn subscription_transcript_items_are_fragments_until_turn_finality() {
+        assert_eq!(
+            public_event(
+                &json!({"type":"input_transcript.added","item":{"text":"Hello "}}),
+                true,
+                &[]
+            ),
+            Some(
+                json!({"type":"live_transcript","role":"user","text":"Hello ","append":true,"final":false})
+            )
+        );
+        assert_eq!(
+            public_event(
+                &json!({"type":"output_transcript.added","item":{"text":"there"}}),
+                true,
+                &[]
+            ),
+            Some(
+                json!({"type":"live_transcript","role":"assistant","text":"there","append":true,"final":false})
+            )
+        );
+    }
+
     #[test]
     fn sideband_projection_never_relays_sessions_capabilities_or_provider_errors() {
         assert_eq!(
