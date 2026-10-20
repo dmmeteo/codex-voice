@@ -1,5 +1,5 @@
-//! HTTP composition: the public API routes, shared limits, browser-origin
-//! guards, and the OpenAI-style error body.
+//! HTTP composition: the public API routes, the static demo client, shared
+//! limits, browser-origin guards, and the OpenAI-style error body.
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -28,6 +28,10 @@ pub struct ServerConfig {
     pub max_upload_bytes: usize,
     pub silk: SilkConfig,
     pub default_language: Option<String>,
+    /// Exact `host[:port]` authorities a reverse proxy presents for the
+    /// browser routes, in addition to the bind address. Ignored without an
+    /// API key, so a proxy can never widen keyless access.
+    pub allowed_hosts: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -75,9 +79,11 @@ pub async fn serve(listener: TcpListener, config: ServerConfig) -> std::io::Resu
 
 /// The full application for a server reachable at `addr`.
 pub fn router(config: ServerConfig, addr: SocketAddr) -> Router {
-    let browser_hosts = browser_hosts(addr, config.api_key.is_some());
+    let browser_hosts = browser_hosts(addr, config.api_key.is_some(), &config.allowed_hosts);
     if browser_hosts.is_empty() {
-        eprintln!("realtime route disabled: a non-loopback bind requires a local API key");
+        eprintln!(
+            "web client and realtime routes disabled: a non-loopback bind requires a local API key"
+        );
     }
     let max_upload_bytes = config.max_upload_bytes;
     let state = AppState {
@@ -92,7 +98,12 @@ pub fn router(config: ServerConfig, addr: SocketAddr) -> Router {
     );
     let api = api.layer(middleware::from_fn(reject_cross_site));
 
-    let browser: Router<AppState> = Router::new();
+    let browser = Router::new()
+        .route("/", get(web::index))
+        .route("/index.js", get(web::index_js))
+        .route("/transcriptions.js", get(web::transcriptions_js))
+        .route("/realtime.js", get(web::realtime_js))
+        .route("/styles.css", get(web::styles));
     #[cfg(feature = "realtime")]
     let browser = browser.route(
         "/v1/realtime/sessions",
@@ -112,11 +123,14 @@ pub fn router(config: ServerConfig, addr: SocketAddr) -> Router {
 
 /// Host names accepted for browser-facing routes. Without a local API key,
 /// only a loopback bind serves them, which blocks DNS rebinding to a public bind.
-fn browser_hosts(addr: SocketAddr, has_api_key: bool) -> Vec<String> {
+fn browser_hosts(addr: SocketAddr, has_api_key: bool, allowed_hosts: &[String]) -> Vec<String> {
     if !has_api_key && !addr.ip().is_loopback() {
         return Vec::new();
     }
     let mut hosts = vec![addr.to_string()];
+    if has_api_key {
+        hosts.extend(allowed_hosts.iter().cloned());
+    }
     if addr.ip().is_loopback() || addr.ip().is_unspecified() {
         hosts.extend([
             format!("localhost:{}", addr.port()),
@@ -214,6 +228,42 @@ fn check_same_origin(headers: &HeaderMap) -> Result<(), ApiError> {
     Ok(())
 }
 
+/// The static demonstration client, compiled into the binary.
+mod web {
+    use axum::http::header;
+    use axum::response::{Html, IntoResponse};
+
+    const JS: &str = "text/javascript; charset=utf-8";
+
+    pub async fn index() -> Html<&'static str> {
+        Html(include_str!("../web/index.html"))
+    }
+    pub async fn index_js() -> impl IntoResponse {
+        (
+            [(header::CONTENT_TYPE, JS)],
+            include_str!("../web/index.js"),
+        )
+    }
+    pub async fn transcriptions_js() -> impl IntoResponse {
+        (
+            [(header::CONTENT_TYPE, JS)],
+            include_str!("../web/transcriptions.js"),
+        )
+    }
+    pub async fn realtime_js() -> impl IntoResponse {
+        (
+            [(header::CONTENT_TYPE, JS)],
+            include_str!("../web/realtime.js"),
+        )
+    }
+    pub async fn styles() -> impl IntoResponse {
+        (
+            [(header::CONTENT_TYPE, "text/css; charset=utf-8")],
+            include_str!("../web/styles.css"),
+        )
+    }
+}
+
 #[derive(Debug)]
 pub(crate) struct ApiError {
     status: StatusCode,
@@ -289,13 +339,26 @@ mod tests {
     fn keyless_browser_routes_require_a_loopback_bind() {
         for host in ["0.0.0.0", "[::]", "192.0.2.1", "[2001:db8::1]"] {
             let addr = format!("{host}:2600").parse().unwrap();
-            assert!(browser_hosts(addr, false).is_empty(), "{host}");
-            assert!(!browser_hosts(addr, true).is_empty(), "{host}");
+            assert!(browser_hosts(addr, false, &[]).is_empty(), "{host}");
+            assert!(!browser_hosts(addr, true, &[]).is_empty(), "{host}");
         }
         for host in ["127.0.0.1", "127.0.0.2", "[::1]"] {
             let addr = format!("{host}:2600").parse().unwrap();
-            assert!(browser_hosts(addr, false).contains(&addr.to_string()));
+            assert!(browser_hosts(addr, false, &[]).contains(&addr.to_string()));
         }
+    }
+
+    #[test]
+    fn allowed_hosts_apply_only_with_an_api_key() {
+        let proxy = vec!["192.168.1.100".to_string()];
+        let addr = "172.19.0.1:2620".parse().unwrap();
+        assert!(browser_hosts(addr, false, &proxy).is_empty());
+        assert_eq!(
+            browser_hosts(addr, true, &proxy),
+            vec!["172.19.0.1:2620".to_string(), "192.168.1.100".to_string()]
+        );
+        let loopback = "127.0.0.1:2600".parse().unwrap();
+        assert!(!browser_hosts(loopback, false, &proxy).contains(&proxy[0]));
     }
 
     #[test]

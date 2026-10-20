@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Codex Voice</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script type="module" src="/index.js"></script>
+</head>
+<body>
+<header>
+  <h1>Codex Voice</h1>
+  <label class="inline">API key <input id="api-key" type="password" autocomplete="off" placeholder="optional"></label>
+</header>
+<nav class="tabs" role="tablist" aria-label="Mode">
+  <button role="tab" id="tab-transcriptions" aria-controls="transcriptions" aria-selected="true">Transcriptions</button>
+  <button role="tab" id="tab-realtime" aria-controls="realtime" aria-selected="false" tabindex="-1">Realtime</button>
+</nav>
+
+<main>
+  <section id="transcriptions" role="tabpanel" aria-labelledby="tab-transcriptions" class="split">
+    <div class="options">
+      <label>Audio file<input id="transcription-file" type="file" accept="audio/*,.silk,.slk"></label>
+      <label>Language<input id="transcription-language" placeholder="auto, or en, uk…" maxlength="35"></label>
+      <div class="actions">
+        <button id="transcribe-file" disabled>Transcribe file</button>
+        <button id="record">Record</button>
+        <button id="record-stop" disabled>Stop</button>
+      </div>
+      <p id="transcription-status" role="status" aria-live="polite">Choose a file or record from the microphone.</p>
+    </div>
+    <div class="output">
+      <h2>Transcript</h2>
+      <p id="transcription-text" class="transcript" aria-live="polite"></p>
+    </div>
+  </section>
+
+  <section id="realtime" role="tabpanel" aria-labelledby="tab-realtime" class="split" hidden>
+    <div class="options">
+      <label>Mode<select id="mode"><option value="standard" selected>Standard</option><option value="advanced">Advanced</option><option value="wingman">Wingman</option></select></label>
+      <label>Voice<select id="voice"><option value="cove" selected>Cove</option><option value="juniper">Juniper</option><option value="ember">Ember</option><option value="glimmer">Sol</option><option value="orbit">Spruce</option><option value="maple">Maple</option><option value="breeze">Breeze</option><option value="fathom">Arbor</option><option value="vale">Vale</option></select></label>
+      <label class="check"><input id="transcripts-enabled" type="checkbox" role="switch" aria-label="Transcripts" checked> Transcripts</label>
+      <label class="check"><input id="save-conversation" type="checkbox" role="switch" aria-label="Save conversation" aria-describedby="save-help"> Save conversation</label>
+      <p id="save-help" class="hint" aria-live="polite">Off keeps this conversation out of ChatGPT history.</p>
+      <div class="actions">
+        <button id="start" disabled>Start</button>
+        <button id="pause" disabled>Pause</button>
+        <button id="stop" disabled>Stop</button>
+      </div>
+      <p id="status" role="status" aria-live="polite">Loading…</p>
+      <p class="hint"><span id="phase">Idle</span> <span id="session-id"></span></p>
+      <p class="hint">Reported model: <span id="reported-model">not reported yet</span></p>
+      <audio id="remote-audio" autoplay></audio>
+    </div>
+    <div class="output">
+      <nav class="tabs small" role="tablist" aria-label="Realtime output">
+        <button role="tab" id="tab-realtime-transcript" aria-controls="realtime-transcript" aria-selected="true">Transcript</button>
+        <button role="tab" id="tab-realtime-events" aria-controls="realtime-events" aria-selected="false" tabindex="-1">Events</button>
+      </nav>
+      <div id="realtime-transcript" role="tabpanel" aria-labelledby="tab-realtime-transcript">
+        <p id="transcript-empty" class="hint">Transcript events from the voice service appear here.</p>
+        <div id="transcripts" aria-live="polite"></div>
+      </div>
+      <div id="realtime-events" role="tabpanel" aria-labelledby="tab-realtime-events" hidden>
+        <button id="clear" class="link">Clear</button>
+        <ol id="events" aria-label="Realtime events"></ol>
+      </div>
+    </div>
+  </section>
+</main>
+</body>
+</html>

@@ -88,7 +88,7 @@ enum Command {
         /// Audio file to transcribe.
         audio: PathBuf,
     },
-    /// Serve the HTTP API.
+    /// Serve the HTTP API and the demonstration web client.
     Serve(ServeArgs),
 }
 
@@ -117,6 +117,11 @@ struct ServeArgs {
     /// Maximum accepted upload size in MiB. Defaults to CODEX_VOICE_MAX_UPLOAD_MB or 10.
     #[arg(long, value_name = "MIB")]
     max_upload_mb: Option<u64>,
+
+    /// Exact Host authority (host or host:port) a private reverse proxy uses for
+    /// the web client and realtime route. Repeatable. Requires a local API key.
+    #[arg(long = "allowed-host", value_name = "HOST[:PORT]")]
+    allowed_hosts: Vec<String>,
 }
 
 fn main() {
@@ -262,10 +267,19 @@ fn run_serve(cli: &Cli, args: &ServeArgs) -> Result<(), AnyError> {
     if args.concurrency == 0 {
         return Err("--concurrency must be greater than 0".into());
     }
+    let api_key = server_api_key(args)?;
+    if !args.allowed_hosts.is_empty() && api_key.is_none() {
+        return Err("--allowed-host requires --api-key or CODEX_VOICE_API_KEY".into());
+    }
+    let allowed_hosts = args
+        .allowed_hosts
+        .iter()
+        .map(|host| parse_authority(host))
+        .collect::<Result<Vec<_>, _>>()?;
     let auth = auth_source(cli);
     auth.load()?;
     let config = ServerConfig {
-        api_key: server_api_key(args)?,
+        api_key,
         auth,
         upstream: UpstreamConfig {
             transcribe_endpoint: cli.endpoint.clone(),
@@ -279,6 +293,7 @@ fn run_serve(cli: &Cli, args: &ServeArgs) -> Result<(), AnyError> {
         max_upload_bytes: max_upload_bytes(args.max_upload_mb)?,
         silk: silk_config(cli),
         default_language: cli.language.clone(),
+        allowed_hosts,
     };
     let addr = format!("{}:{}", args.host, args.port);
     let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -312,6 +327,28 @@ fn server_api_key(args: &ServeArgs) -> Result<Option<String>, AnyError> {
         .ok_or_else(|| "serve requires --api-key, CODEX_VOICE_API_KEY, or --no-api-key".into())
 }
 
+/// Accepts only a bare `host` or `host:port`, as browsers send in `Host`.
+#[cfg(feature = "server")]
+fn parse_authority(value: &str) -> Result<String, AnyError> {
+    let invalid = || format!("--allowed-host must be host or host:port, got {value:?}");
+    if !value
+        .bytes()
+        .all(|c| c.is_ascii_alphanumeric() || b".-:[]".contains(&c))
+    {
+        return Err(invalid().into());
+    }
+    let url = reqwest::Url::parse(&format!("http://{value}")).map_err(|_| invalid())?;
+    let authority = url.authority().to_ascii_lowercase();
+    if url.host_str().is_none()
+        || url.path() != "/"
+        || !url.username().is_empty()
+        || authority != value.to_ascii_lowercase()
+    {
+        return Err(invalid().into());
+    }
+    Ok(authority)
+}
+
 #[cfg(feature = "server")]
 fn max_upload_bytes(explicit_mib: Option<u64>) -> Result<usize, AnyError> {
     let mib = match explicit_mib {
@@ -324,4 +361,27 @@ fn max_upload_bytes(explicit_mib: Option<u64>) -> Result<usize, AnyError> {
     mib.checked_mul(1024 * 1024)
         .and_then(|bytes| usize::try_from(bytes).ok())
         .ok_or_else(|| "max upload size is too large".into())
+}
+
+#[cfg(all(test, feature = "server"))]
+mod tests {
+    use super::parse_authority;
+
+    #[test]
+    fn allowed_hosts_must_be_exact_authorities() {
+        assert_eq!(parse_authority("192.168.1.100").unwrap(), "192.168.1.100");
+        assert_eq!(parse_authority("Voice.LAN:8443").unwrap(), "voice.lan:8443");
+        assert_eq!(parse_authority("[::1]:2600").unwrap(), "[::1]:2600");
+        for bad in [
+            "*",
+            "*.lan",
+            "https://voice.lan",
+            "voice.lan/path",
+            "user@voice.lan",
+            "",
+            "voice.lan:x",
+        ] {
+            assert!(parse_authority(bad).is_err(), "{bad}");
+        }
+    }
 }

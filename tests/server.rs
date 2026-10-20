@@ -1,4 +1,4 @@
-//! HTTP routes, local authorization, and error bodies.
+//! HTTP routes, local authorization, error bodies, and static delivery.
 //! Upstream ChatGPT endpoints are replaced by in-process mock servers; these
 //! tests never contact a live transcription or voice service.
 #![cfg(all(feature = "server", feature = "realtime"))]
@@ -105,6 +105,7 @@ fn config(base: &str, api_key: Option<&str>) -> ServerConfig {
             ..SilkConfig::default()
         },
         default_language: None,
+        allowed_hosts: Vec::new(),
     }
 }
 
@@ -408,12 +409,19 @@ async fn realtime_routes_enforce_key_type_and_body_limits_before_upstream() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn keyless_public_bind_rejects_forged_loopback_hosts_on_realtime() {
+async fn keyless_public_bind_rejects_forged_loopback_hosts_on_browser_routes() {
     let (base, _) = mock_upstream(StatusCode::OK).await;
     for bind in ["0.0.0.0:2600", "[::]:2600", "192.0.2.1:2600"] {
         let app = router(config(&base, None), bind.parse().unwrap());
         for host in ["127.0.0.1:2600", "localhost:2600", "[::1]:2600", bind] {
-            for (method, path) in [("POST", "/v1/realtime/sessions")] {
+            for (method, path) in [
+                ("GET", "/"),
+                ("GET", "/index.js"),
+                ("GET", "/transcriptions.js"),
+                ("GET", "/realtime.js"),
+                ("GET", "/styles.css"),
+                ("POST", "/v1/realtime/sessions"),
+            ] {
                 let request = Request::builder()
                     .method(method)
                     .uri(path)
@@ -428,4 +436,128 @@ async fn keyless_public_bind_rejects_forged_loopback_hosts_on_realtime() {
             }
         }
     }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn static_client_is_served_with_security_headers_and_old_routes_are_gone() {
+    let (base, _) = mock_upstream(StatusCode::OK).await;
+    let app = app(config(&base, Some(KEY)));
+    for (path, content_type, marker) in [
+        (
+            "/",
+            "text/html; charset=utf-8",
+            "<title>Codex Voice</title>",
+        ),
+        ("/index.js", "text/javascript; charset=utf-8", "import"),
+        (
+            "/transcriptions.js",
+            "text/javascript; charset=utf-8",
+            "/v1/audio/transcriptions",
+        ),
+        (
+            "/realtime.js",
+            "text/javascript; charset=utf-8",
+            "/v1/realtime/sessions",
+        ),
+        ("/styles.css", "text/css; charset=utf-8", "body"),
+    ] {
+        let request = Request::get(path)
+            .header("host", HOST)
+            .body(Body::empty())
+            .unwrap();
+        let (status, headers, body) = send(&app, request).await;
+        assert_eq!(status, StatusCode::OK, "{path}");
+        assert_eq!(headers["content-type"], content_type, "{path}");
+        assert_eq!(headers["cache-control"], "no-store");
+        assert_eq!(headers["x-content-type-options"], "nosniff");
+        assert!(headers["content-security-policy"]
+            .to_str()
+            .unwrap()
+            .contains("connect-src 'self'"));
+        assert!(String::from_utf8(body).unwrap().contains(marker), "{path}");
+    }
+    let health = Request::get("/healthz").body(Body::empty()).unwrap();
+    let (status, _, body) = send(&app, health).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body, br#"{"status":"ok"}"#);
+    for (method, path) in [
+        ("POST", "/audio/transcriptions"),
+        ("GET", "/voice"),
+        ("GET", "/v1/voice/config"),
+        ("POST", "/v1/voice/sessions"),
+    ] {
+        let request = Request::builder()
+            .method(method)
+            .uri(path)
+            .header("host", HOST)
+            .body(Body::empty())
+            .unwrap();
+        assert_eq!(send(&app, request).await.0, StatusCode::NOT_FOUND, "{path}");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn proxy_host_is_accepted_only_when_allowed_and_keyed() {
+    let (base, upstream) = mock_upstream(StatusCode::OK).await;
+    let bind: SocketAddr = "172.19.0.1:2620".parse().unwrap();
+    let mut keyed = config(&base, Some(KEY));
+    keyed.allowed_hosts = vec!["192.168.1.100".into()];
+    let app = router(keyed, bind);
+    let get = |host: &str, origin: Option<&str>, forwarded: Option<&str>| {
+        let mut request = Request::get("/").header("host", host);
+        if let Some(origin) = origin {
+            request = request.header("origin", origin);
+        }
+        if let Some(forwarded) = forwarded {
+            request = request
+                .header("x-forwarded-host", forwarded)
+                .header("forwarded", format!("host={forwarded}"));
+        }
+        request.body(Body::empty()).unwrap()
+    };
+    assert_eq!(
+        send(&app, get("192.168.1.100", None, None)).await.0,
+        StatusCode::OK
+    );
+    assert_eq!(
+        send(
+            &app,
+            get("192.168.1.100", Some("https://192.168.1.100"), None)
+        )
+        .await
+        .0,
+        StatusCode::OK
+    );
+    for (host, origin, forwarded) in [
+        ("evil.example", None, None),
+        ("evil.example", None, Some("192.168.1.100")),
+        ("192.168.1.100", Some("https://evil.example"), None),
+        ("192.168.1.100:8443", None, None),
+    ] {
+        let (status, _, _) = send(&app, get(host, origin, forwarded)).await;
+        assert_eq!(
+            status,
+            StatusCode::FORBIDDEN,
+            "{host} {origin:?} {forwarded:?}"
+        );
+    }
+    let unauthenticated =
+        realtime_request("192.168.1.100", "wrong", json!({"sdp": SDP}).to_string());
+    let mut unauthenticated = unauthenticated;
+    unauthenticated
+        .headers_mut()
+        .insert("origin", "https://192.168.1.100".parse().unwrap());
+    assert_eq!(
+        send(&app, unauthenticated).await.0,
+        StatusCode::UNAUTHORIZED
+    );
+    assert!(upstream.sessions.lock().unwrap().is_empty());
+
+    let mut keyless = config(&base, None);
+    keyless.allowed_hosts = vec!["192.168.1.100".into()];
+    let app = router(keyless, bind);
+    assert_eq!(
+        send(&app, get("192.168.1.100", None, None)).await.0,
+        StatusCode::FORBIDDEN
+    );
 }

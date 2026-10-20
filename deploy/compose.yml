@@ -1,0 +1,25 @@
+# Loopback-only deployment. The port is published on 127.0.0.1 and nowhere else.
+services:
+  codex-voice:
+    image: ghcr.io/dmmeteo/codex-voice:latest
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${CODEX_VOICE_PORT:-2600}:2600"
+    environment:
+      CODEX_VOICE_API_KEY: ${CODEX_VOICE_API_KEY:?set CODEX_VOICE_API_KEY}
+      CODEX_VOICE_PROXY: ${CODEX_VOICE_PROXY:-}
+      CODEX_VOICE_MAX_UPLOAD_MB: ${CODEX_VOICE_MAX_UPLOAD_MB:-10}
+      CODEX_VOICE_REQUEST_TIMEOUT_SECONDS: ${CODEX_VOICE_REQUEST_TIMEOUT_SECONDS:-120}
+      CODEX_VOICE_CONNECT_TIMEOUT_SECONDS: ${CODEX_VOICE_CONNECT_TIMEOUT_SECONDS:-10}
+    command:
+      - serve
+      - --host
+      - 0.0.0.0
+      - --port
+      - "2600"
+      - --auth-file
+      - /run/secrets/codex_auth
+      - --concurrency
+      - ${CODEX_VOICE_CONCURRENCY:-1}
+    volumes:
+      - ${CODEX_VOICE_AUTH_FILE:?set CODEX_VOICE_AUTH_FILE}:/run/secrets/codex_auth:ro
