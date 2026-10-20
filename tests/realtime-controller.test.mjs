@@ -19,6 +19,13 @@ function fixture() {
   return {get: id => document.getElementById(id), session};
 }
 
+function choose(f, mode) {
+  f.get('mode').value = mode;
+  f.get('mode').listeners.change();
+}
+
+const READY = 'Ready. Start to allow microphone access.';
+
 test('Save conversation is an accessible switch that starts unchecked', () => {
   const input = html.match(/<input[^>]+id="save-conversation"[^>]*>/)?.[0];
   assert.ok(input);
@@ -28,10 +35,38 @@ test('Save conversation is an accessible switch that starts unchecked', () => {
   assert.match(html, /ChatGPT history/);
 });
 
-test('Defaults are Standard, Cove, transcripts on, and history off', () => {
+test('Wingman is the only preselected mode', () => {
+  const select = html.match(/<select id="mode">.*?<\/select>/)?.[0];
+  assert.deepEqual([...select.matchAll(/<option value="(\w+)"( selected)?>/g)].map(([, value, selected]) => [value, Boolean(selected)]),
+    [['standard', false], ['advanced', false], ['wingman', true]]);
+});
+
+test('Defaults are Wingman, Cove, transcripts on, and Save off, so Start waits for explicit saving', () => {
   const f = fixture();
-  assert.equal(f.get('mode').value, 'standard');
+  assert.equal(f.get('mode').value, 'wingman');
   assert.equal(f.get('voice').value, 'cove');
+  assert.equal(f.get('transcripts-enabled').checked, true);
+  assert.equal(f.get('save-conversation').checked, false);
+  assert.equal(f.get('start').disabled, true);
+  assert.equal(f.get('status').textContent, 'Wingman voice requires Save conversation. Turn it on, or choose Standard.');
+  assert.equal(f.get('save-help').textContent, 'This mode requires saving to ChatGPT history. Turn on Save conversation, or choose Standard.');
+  f.get('start').listeners.click();
+  assert.equal(f.session.offers.length, 0);
+  f.get('save-conversation').checked = true;
+  f.get('save-conversation').listeners.change();
+  assert.equal(f.get('start').disabled, false);
+  assert.equal(f.get('status').textContent, READY);
+  f.get('start').listeners.click();
+  assert.equal(f.session.offers[0].mode, 'wingman');
+  assert.equal(f.session.offers[0].history_and_training_disabled, false);
+});
+
+test('Standard, when chosen, starts with Cove, transcripts on, and history off', () => {
+  const f = fixture();
+  choose(f, 'standard');
+  assert.equal(f.get('start').disabled, false);
+  assert.equal(f.get('status').textContent, READY);
+  assert.equal(f.get('save-help').textContent, 'Off keeps this conversation out of ChatGPT history.');
   f.get('start').listeners.click();
   assert.equal(f.session.offers[0].mode, 'standard');
   assert.equal(f.session.offers[0].voice, 'cove');
@@ -42,7 +77,7 @@ test('Defaults are Standard, Cove, transcripts on, and history off', () => {
 
 test('Advanced and Wingman require explicit saving before Start', () => {
   const f = fixture();
-  assert.equal(f.get('start').disabled, false);
+  assert.equal(f.get('start').disabled, true);
   for (const mode of ['advanced', 'wingman']) {
     f.get('mode').value = mode;
     f.get('mode').listeners.change();
@@ -65,6 +100,7 @@ test('Advanced and Wingman require explicit saving before Start', () => {
 for (const save of [false, true]) {
   test(`Start sends the inverse save choice and locks settings while starting, active, and paused (${save})`, () => {
     const f = fixture();
+    choose(f, 'standard');
     f.get('api-key').value = 'local-key';
     f.get('save-conversation').checked = save;
     f.get('save-conversation').listeners.change();
@@ -86,6 +122,7 @@ for (const save of [false, true]) {
 
 test('Data channel events fill the Transcript and Events panes; Clear empties only Events', () => {
   const f = fixture();
+  choose(f, 'standard');
   f.get('start').listeners.click();
   f.session.onEvent({type: 'full_chat_message', payload: {message: {id: 'u1', author: {role: 'user'}, content: {parts: ['Hello']}}}});
   f.session.onEvent({type: 'full_chat_message', payload: {message: {id: 'a1', author: {role: 'assistant'}, content: {parts: ['Hi there']}, metadata: {resolved_model_slug: 'reported-model'}}}});
@@ -103,7 +140,8 @@ test('Data channel events fill the Transcript and Events panes; Clear empties on
 
 test('A disabled Start states the history requirement in the status line', () => {
   const f = fixture();
-  assert.equal(f.get('status').textContent, 'Ready. Start to allow microphone access.');
+  choose(f, 'standard');
+  assert.equal(f.get('status').textContent, READY);
   f.get('mode').value = 'advanced';
   f.get('mode').listeners.change();
   assert.equal(f.get('start').disabled, true);
@@ -118,6 +156,7 @@ const rows = f => f.get('transcripts').children.map(row => [row.dataset.role, ..
 
 test('New utterances appear at the top as speaker-labelled user and assistant bubbles', () => {
   const f = fixture();
+  choose(f, 'standard');
   f.get('start').listeners.click();
   f.session.onEvent({type: 'full_chat_message', payload: {message: message('u1', 'user', 'Hello')}});
   f.session.onEvent({type: 'full_chat_message', payload: {message: message('a1', 'assistant', 'Hi there')}});
@@ -133,6 +172,7 @@ test('Every rendered speaker role has a bubble style', async () => {
 
 test('Streaming deltas and the final snapshot edit one utterance in place without reordering', () => {
   const f = fixture();
+  choose(f, 'standard');
   f.get('start').listeners.click();
   f.session.onEvent({type: 'full_chat_message', payload: {message: message('u1', 'user', 'Hello')}});
   f.session.onEvent({type: 'chat_message_delta', payload: {delta: {c: 0, p: '', o: 'add', v: {message: message('a1', 'assistant', 'Hi')}}}});
@@ -150,6 +190,7 @@ test('Streaming deltas and the final snapshot edit one utterance in place withou
 
 test('Transcript keeps the newest 100 utterances and Start clears it', () => {
   const f = fixture();
+  choose(f, 'standard');
   f.get('start').listeners.click();
   for (let i = 0; i < 105; i++) f.session.onEvent({type: 'full_chat_message', payload: {message: message(`m${i}`, 'user', `line ${i}`)}});
   const list = f.get('transcripts').children;
@@ -178,6 +219,7 @@ test('Events show a type heading over indented JSON in a PRE block, newest first
 
 test('Markup-looking event and transcript text renders as literal text', () => {
   const f = fixture();
+  choose(f, 'standard');
   f.get('start').listeners.click();
   const unsafe = '</pre><script>alert(1)</script><img src=x onerror=alert(2)>';
   f.session.onEvent({type: 'full_chat_message', payload: {message: message('u1', 'user', unsafe)}});
@@ -186,4 +228,17 @@ test('Markup-looking event and transcript text renders as literal text', () => {
   assert.equal(pre.children.length, 0);
   assert.equal(pre.textContent, `{\n  "message": {\n    "id": "u1",\n    "author": {\n      "role": "user"\n    },\n    "content": {\n      "parts": [\n        "${unsafe}"\n      ]\n    }\n  }\n}`);
   assert.deepEqual(rows(f), [['user', 'You', unsafe]]);
+});
+
+test('Mode and Voice share one inset chevron in place of the native arrow', async () => {
+  const css = await readFile(new URL('../web/styles.css', import.meta.url), 'utf8');
+  for (const id of ['mode', 'voice']) assert.match(html, new RegExp(`<select id="${id}">`));
+  assert.doesNotMatch(css, /#(?:mode|voice)\b/);
+  const rule = css.match(/(?:^|\n)select\s*\{([^}]*)\}/)?.[1] ?? '';
+  assert.match(rule, /(?:^|;)\s*appearance:\s*none/);
+  assert.match(rule, /-webkit-appearance:\s*none/);
+  assert.match(rule, /background-repeat:\s*no-repeat/);
+  const px = property => Number(rule.match(new RegExp(`${property}:\\s*(?:right\\s+)?(\\d+)px`))?.[1]);
+  assert.equal(px('background-position'), 10, 'chevron sits 10px in from the right edge, matching the 10px text inset');
+  assert.ok(px('padding-right') >= px('background-position') + px('background-size') + 6, 'text never runs under the chevron');
 });
